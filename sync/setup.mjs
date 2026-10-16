@@ -215,6 +215,32 @@ step(6, TOTAL, '检查站点连通性');
 }
 
 // ------------------------------------------------------------
+// 6.5 自动跑线上冒烟验收
+// 这一步是必需的：本地 Node / 本地 workerd 都不复现 Cloudflare 的平台限制
+// （例如 PBKDF2 迭代上限），曾经因此出现「本地全绿、线上登录 500」。
+// ------------------------------------------------------------
+{
+  console.log(c.d('\n  运行线上冒烟验收（smoke.mjs）…'));
+  const res = spawnSync('node', ['smoke.mjs', siteUrl], {
+    cwd: here, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const out = ((res.stdout || '') + (res.stderr || '')).replace(/\x1b\[[0-9;]*m/g, '');
+  const tail = out.trim().split('\n');
+  // 只回显失败项与结论，避免刷屏
+  const fails = tail.filter(l => l.includes('✗'));
+  const summary = tail.filter(l => /通过 \d+ 项|线上服务正常|线上有问题/.test(l));
+  fails.forEach(l => console.log(c.y('  ' + l.trim())));
+  summary.forEach(l => console.log('  ' + (l.includes('❌') || l.includes('失败') && !l.includes('失败 0') ? c.r(l.trim()) : c.g(l.trim()))));
+
+  if (res.status !== 0) {
+    console.log(c.r('\n✗ 线上冒烟验收未通过 —— 部署虽然成功，但服务有问题。'));
+    console.log(c.y('  请把上面的失败项发我，或查看完整输出：node smoke.mjs ' + siteUrl));
+    process.exit(4);
+  }
+  console.log(c.g('  ✓ 线上冒烟验收通过'));
+}
+
+// ------------------------------------------------------------
 step(7, TOTAL, '完成');
 {
   console.log(`

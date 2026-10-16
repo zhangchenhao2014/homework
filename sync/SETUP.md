@@ -171,15 +171,35 @@ npm run deploy
 ## 常用运维命令
 
 ```powershell
-npm test                    # 三套离线测试（147 项）
-npm run test:e2e            # 对着真实运行的后端跑（45 项）
+npm test                      # 五套离线测试（185 项）
+npm run test:e2e              # 对着本地运行的后端跑（45 项）
+npm run smoke                 # 对线上站点做冒烟验收（只读，14 项）
+npm run smoke -- --password '口令'   # 追加登录与读写链路验证
+npm run deploy                # 改了页面后重新发布
 npx wrangler pages deployment list
 npx wrangler d1 execute homework-sync --remote --command "SELECT COUNT(*) FROM devices"
 ```
+
+### 为什么必须有 npm run smoke
+
+本地 Node 和本地 workerd **都不复现 Cloudflare 的平台限制**，例如
+PBKDF2 迭代次数上限 100000。曾经因此出现：
+
+- 本地 147 项测试全绿
+- `npm run setup` 一路成功（建号只写哈希，不校验）
+- **线上登录直接 500**：`Pbkdf2 failed: iteration counts above 100000 are not supported`
+
+唯一可靠的办法是部署后对真实站点做一次黑盒验收。`npm run setup` 现在会自动
+调用它，所以这类问题不会再"部署成功但用不了"。
+
+现在 `npm test` 里也加了 `test/platform-limits.test.mjs`：它把 Cloudflare 的
+限制**模拟**到 `globalThis.crypto` 上，在本地就能撞出这类 bug。
 
 ## 数据说明
 
 - 云端每个账号存**一条 JSON 记录**（作业清单 + 计时记录），上限 1MB
 - 单条计时记录约 200 字节，1MB 够存数千条，正常使用多年无压力
 - Cloudflare 免费额度：D1 每天 500 万次读、10 万次写，Pages 每月 500 次构建，个人用远远够
+- 登录接口要做 10 万次 PBKDF2 迭代（约十几毫秒 CPU），这是**有意为之**：
+  宁可慢一点，也不降低口令哈希强度
 

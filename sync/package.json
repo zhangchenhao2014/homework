@@ -6,19 +6,21 @@
   "type": "module",
   "scripts": {
     "setup": "node setup.mjs",
+    "deploy": "wrangler pages deploy assets --project-name homework --branch main --commit-dirty=true",
+    "smoke": "node smoke.mjs",
+    "build": "node build-page.mjs",
     "bootstrap": "node bootstrap-db.mjs",
     "bootstrap:remote": "node bootstrap-db.mjs --remote",
-    "build": "node build-page.mjs",
-    "test": "node test/crypto.test.mjs && node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
+    "test": "node test/crypto.test.mjs && node test/platform-limits.test.mjs && node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
+    "test:crypto": "node test/crypto.test.mjs",
+    "test:limits": "node test/platform-limits.test.mjs",
     "test:worker": "node test/worker.test.mjs",
     "test:sync": "node test/sync.test.mjs",
     "test:page": "node test/page.test.mjs",
     "test:e2e": "node test/real-e2e.mjs",
     "dev": "wrangler pages dev",
-    "deploy": "wrangler pages deploy assets --project-name homework --branch main --commit-dirty=true",
     "db:create": "wrangler d1 create homework-sync",
     "db:local": "wrangler d1 execute homework-sync --local --file=./schema.sql",
-    "db:remote": "wrangler d1 execute homework-sync --remote --file=./schema.sql",
-    "test:crypto": "node test/crypto.test.mjs"
+    "db:remote": "wrangler d1 execute homework-sync --remote --file=./schema.sql"
   }
 }
