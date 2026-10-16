@@ -44,6 +44,19 @@ npm run setup
 然后打开 https://zhangchenhao2014.github.io/homework/ ，点右上角「账号」，
 填上脚本输出的服务地址 + 口令即可。
 
+### 如果卡在「部署 Worker」这一步
+
+Cloudflare 要求先注册一个 **workers.dev 子域名**，否则不允许发布。报错长这样：
+
+```
+You need to register a workers.dev subdomain before publishing to workers.dev
+```
+
+处理办法：打开脚本给出的链接（或 https://dash.cloudflare.com → Workers & Pages），
+起一个子域名（随便取，比如你的昵称）并确认，然后**原样重跑 `npm run setup`**。
+
+数据库和机密已经建好了，重跑会自动跳过前面几步，不会重复创建。
+
 ---
 
 ## 部署（手动，仅当脚本失败时）

@@ -143,11 +143,24 @@ step(5, TOTAL, '部署 Worker');
 let workerUrl = '';
 {
   const r = wrangler(['deploy']);
-  console.log(c.d(r.out.trim().split('\n').slice(-10).join('\n')));
+  // 只在失败时打印原始输出，避免刷屏
   const m = r.out.match(/https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev/i)
     || r.out.match(/https:\/\/[^\s]*workers\.dev/i);
+
+  // 常见坑：Cloudflare 要求先注册一个 workers.dev 子域名，否则无法发布
+  if (/register a workers\.dev subdomain/i.test(r.out) || /workers\/onboarding/i.test(r.out)) {
+    const url = (r.out.match(/https:\/\/dash\.cloudflare\.com\/[^\s]*workers\/onboarding/) || [])[0];
+    console.log(c.y('\n⚠️  还差一步：你还没有 workers.dev 子域名，Cloudflare 不允许发布。'));
+    console.log('\n  请打开下面这个链接，随便起一个子域名（例如你的昵称），点确认：');
+    console.log('  ' + c.b(url || 'https://dash.cloudflare.com → Workers & Pages → 设置子域名'));
+    console.log('\n  完成后回到这里重新执行：' + c.b('npm run setup'));
+    console.log(c.d('  （数据库和机密已经建好了，重跑会跳过，不会重复创建）'));
+    process.exit(2);
+  }
+
   if (r.code !== 0 || !m) {
-    console.log(c.r('✗ 部署失败或没解析到服务地址'));
+    console.log(c.r('✗ 部署失败：'));
+    console.log(c.d(r.out.trim().split('\n').slice(-15).join('\n')));
     process.exit(1);
   }
   workerUrl = m[0].replace(/\/+$/, '');

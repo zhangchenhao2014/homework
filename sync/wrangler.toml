@@ -12,7 +12,7 @@ compatibility_date = "2025-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "homework-sync"
-database_id = "REPLACE_WITH_YOUR_D1_ID"
+database_id = "b727ebc2-40b2-4540-8b4f-201757f1a910"
 
 [vars]
 # 只允许你自己的 GitHub Pages 域名调用这些接口（改成你的实际网址）
