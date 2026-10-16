@@ -52,8 +52,10 @@ try {
 const n = existing[0]?.results?.[0]?.n ?? 0;
 if (n > 0) {
   console.log(c.y(`\n⚠️ 数据库里已有 ${n} 个账号。`));
-  console.log(c.y('若要重发凭据，请先清空（会丢失同步数据）：'));
-  console.log(c.d(`  npx wrangler d1 execute ${DB_NAME} ${REMOTE ? '--remote ' : ''}--command "DELETE FROM users; DELETE FROM devices; DELETE FROM backup_codes;"`));
+  console.log(c.y('若要重发凭据，请先清空（会丢失云端同步数据，本机数据不受影响）：'));
+  // 注意删除顺序：backup_codes 与 devices 都有指向 users 的外键，
+  // 必须先删子表再删 users，否则会报 FOREIGN KEY constraint failed。
+  console.log(c.d(`  npx wrangler d1 execute ${DB_NAME} ${REMOTE ? '--remote ' : ''}-y --command "DELETE FROM backup_codes; DELETE FROM devices; DELETE FROM sync_data; DELETE FROM users;"`));
   process.exit(2);
 }
 console.log(c.g('✓ 尚无账号，可以创建'));

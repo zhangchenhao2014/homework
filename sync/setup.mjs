@@ -122,7 +122,9 @@ step(4, TOTAL, '创建账号（离线写入，不经过 HTTP）');
   if (res.status !== 0) {
     if (/已有 \d+ 个账号/.test(out)) {
       console.log(c.y('账号已存在。若要重设口令，请先执行：'));
-      console.log(c.d(`  npx wrangler d1 execute ${DB} --remote --command "DELETE FROM users; DELETE FROM devices; DELETE FROM backup_codes;"`));
+      // 必须先删子表（backup_codes / devices 都有指向 users 的外键），
+      // 否则会报 FOREIGN KEY constraint failed
+      console.log(c.d(`  npx wrangler d1 execute ${DB} --remote -y --command "DELETE FROM backup_codes; DELETE FROM devices; DELETE FROM sync_data; DELETE FROM users;"`));
       console.log(c.y('然后重跑 npm run setup（会丢失云端同步数据，本机数据不受影响）。'));
       process.exit(2);
     }
