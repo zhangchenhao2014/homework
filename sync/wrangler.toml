@@ -1,0 +1,22 @@
+# ============================================================
+#  Cloudflare Worker 配置
+#  部署前只需改一处：把下面的 database_id 换成你自己的 D1 ID
+#  （执行 npm run db:create 后，命令输出里会给出 database_id）
+# ============================================================
+
+name = "homework-sync"
+main = "src/worker.js"
+compatibility_date = "2025-01-01"
+
+# 同步数据存储
+[[d1_databases]]
+binding = "DB"
+database_name = "homework-sync"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
+
+[vars]
+# 只允许你自己的 GitHub Pages 域名调用这些接口（改成你的实际网址）
+ALLOWED_ORIGINS = "https://zhangchenhao2014.github.io,http://localhost:18322,http://127.0.0.1:18322"
+
+# 注意：SETUP_TOKEN 不写在这里！它属于机密，用命令行设置：
+#   npx wrangler secret put SETUP_TOKEN

@@ -16,6 +16,98 @@
   }
   h1 { font-size: 22px; margin-bottom: 4px; }
   .subtitle { font-size: 13px; color: #999; margin-bottom: 16px; }
+
+  /* ---------- 顶部账号栏 ---------- */
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .topbar .grow { flex: 1; min-width: 0; }
+  .acct {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #c9ced6;
+    flex-shrink: 0;
+  }
+  .dot.on { background: #17a45f; }
+  .dot.busy { background: #ff9500; }
+  .dot.off { background: #ff5a5a; }
+  .dot.local { background: #c9ced6; }
+  .acct-text { font-size: 12px; color: #888; white-space: nowrap; }
+
+  /* ---------- 提示条 ---------- */
+  .notice {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: #fff8e6;
+    border: 1px solid #ffe1a8;
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #7a5b12;
+  }
+  .notice.ok { background: #eefaf2; border-color: #b9e8cd; color: #0f6b40; }
+  .notice.err { background: #fdeeee; border-color: #f7c6c6; color: #9c2b2b; }
+  .notice .grow { flex: 1; min-width: 0; }
+  .notice button { font-size: 13px; padding: 6px 12px; }
+
+  /* ---------- 弹窗 ---------- */
+  .modal-mask {
+    position: fixed;
+    inset: 0;
+    background: rgba(20,24,32,.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 100;
+  }
+  .modal {
+    background: #fff;
+    border-radius: 14px;
+    padding: 20px;
+    width: 100%;
+    max-width: 420px;
+    max-height: 90vh;
+    overflow: auto;
+    box-shadow: 0 12px 40px rgba(0,0,0,.22);
+  }
+  .modal h3 { font-size: 17px; margin-bottom: 6px; }
+  .modal .desc { font-size: 13px; color: #888; margin-bottom: 16px; line-height: 1.6; }
+  .modal label.field { display: block; font-size: 13px; color: #666; margin: 12px 0 5px; }
+  .modal input, .modal select { width: 100%; }
+  .modal .row { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .modal .row button { flex: 1; min-width: 110px; }
+  .modal .err { color: #d33; font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .modal .alt { margin-top: 14px; font-size: 13px; text-align: center; }
+  .modal .alt a { color: #4a7cff; cursor: pointer; text-decoration: underline; }
+  .codes {
+    background: #f7f8fa;
+    border-radius: 8px;
+    padding: 12px;
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.9;
+    word-break: break-all;
+    max-height: 200px;
+    overflow: auto;
+    margin-top: 8px;
+  }
+  .kv { font-size: 13px; color: #555; line-height: 2; }
+  .kv b { color: #333; }
+
   .card {
     background: #fff;
     border-radius: 12px;
@@ -236,8 +328,20 @@
 </head>
 <body>
 
-<h1>📚 假期作业记录</h1>
-<div class="subtitle">先建清单 → 点作业开始计时 → 完成后打勾</div>
+<div class="topbar">
+  <div class="grow">
+    <h1>📚 假期作业记录</h1>
+    <div class="subtitle">先建清单 → 点作业开始计时 → 完成后打勾</div>
+  </div>
+  <div class="acct">
+    <span class="dot local" id="acctDot"></span>
+    <span class="acct-text" id="acctText">未登录 · 仅本机</span>
+    <button class="ghost mini" id="acctBtn">账号</button>
+  </div>
+</div>
+
+<!-- 同步提示条（登录引导 / 离线提醒 / 错误） -->
+<div id="syncBar"></div>
 
 <!-- 当前假期 -->
 <div class="vacation-bar">
@@ -334,7 +438,234 @@
 
 <div id="toastBox"></div>
 
+<!-- 弹窗容器 -->
+<div id="modalRoot"></div>
+
 <script defer>
+/* __SYNC_CLIENT_START__ */
+// ============================================================
+//  同步客户端（同步引擎的唯一副本）
+//  这个文件被两个地方复用：
+//   1. index.html 构建时把它的内容内联进 <script>（见 sync/build-page.mjs）
+//   2. Node 测试直接 import
+//  这样保证“测试过的逻辑”和“线上跑的逻辑”是同一份代码。
+//
+//  设计要点：
+//   1. 本地优先：localStorage 始终可用，断网也能正常记作业
+//   2. 合并按“集合”而不是“整块覆盖”：
+//        - 作业按 id 去重，同一项取信息更完整的版本（已完成优先）
+//        - 计时记录按 id 去重，取更完整的版本
+//        - 取并集，绝不丢弃任一设备的记录
+//   3. 推送带 baseUpdatedAt 做乐观并发控制：云端被另一台设备改过 -> 409，
+//      客户端合并后自动重试（最多 4 轮），不会覆盖对方数据
+// ============================================================
+
+/** 取两个“同一项作业”中更可信的版本 */
+function pickTask(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const rank = (t) => (t.status === 'done' ? 2 : t.status === 'archived' ? 1 : 0);
+  const ra = rank(a), rb = rank(b);
+  if (ra !== rb) return ra > rb ? a : b;
+  const ta = Number(a.doneTime || a.createdAt || 0);
+  const tb = Number(b.doneTime || b.createdAt || 0);
+  if (ta !== tb) return ta > tb ? a : b;
+  // 时间也相同：合并字段，宁可保留备注/假期等有用信息
+  return Object.assign({}, b, a, {
+    note: a.note || b.note || '',
+    vacation: a.vacation || b.vacation || '',
+    subject: a.subject || b.subject || ''
+  });
+}
+
+/** 取两个“同一段计时”中更完整的版本 */
+function pickSession(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const ea = Number(a.endTime || 0), eb = Number(b.endTime || 0);
+  if (ea !== eb) return ea > eb ? a : b;
+  const da = Number(a.duration || 0), db = Number(b.duration || 0);
+  if (da !== db) return da > db ? a : b;
+  return a;
+}
+
+/** 按 id 合并两个数组，保留双方全部条目 */
+function mergeById(listA, listB, pick) {
+  const out = new Map();
+  for (const item of (listA || [])) {
+    if (item && item.id) out.set(item.id, item);
+  }
+  for (const item of (listB || [])) {
+    if (!item || !item.id) continue;
+    out.set(item.id, out.has(item.id) ? pick(out.get(item.id), item) : item);
+  }
+  return [...out.values()];
+}
+
+/** 假期列表取并集，保持顺序稳定 */
+function mergeVacations(a, b) {
+  const out = [];
+  const seen = new Set();
+  for (const v of [].concat(a || [], b || [])) {
+    if (v && !seen.has(v)) { seen.add(v); out.push(v); }
+  }
+  return out;
+}
+
+/** 合并两个完整状态 */
+function mergeStates(localState, remoteState) {
+  const local = localState || {};
+  const remote = remoteState || {};
+  let sessions = mergeById(local.sessions, remote.sessions, pickSession);
+
+  // 两台设备可能各自留下一个“计时中”，合并后只保留开始较晚的一个
+  const doing = sessions.filter(s => s && s.status === 'doing');
+  if (doing.length > 1) {
+    const keep = doing.reduce(
+      (best, s) => (Number(s.startTime || 0) > Number(best.startTime || 0) ? s : best), doing[0]
+    );
+    sessions = sessions.map(s => (s.status === 'doing' && s.id !== keep.id)
+      ? Object.assign({}, s, {
+          status: 'abandoned',
+          endTime: s.endTime || keep.startTime,
+          duration: Number(s.duration || 0)
+        })
+      : s);
+  }
+
+  return {
+    tasks: mergeById(local.tasks, remote.tasks, pickTask),
+    sessions,
+    vacations: mergeVacations(local.vacations, remote.vacations),
+    currentVacation: local.currentVacation || remote.currentVacation || ''
+  };
+}
+
+function resolveFetch(fetchLike) {
+  const f = fetchLike || (typeof fetch !== 'undefined' ? fetch : null);
+  if (!f) throw new Error('fetch_unavailable');
+  return f;
+}
+
+function trimBase(apiBase) {
+  return String(apiBase || '').replace(/\/+$/, '');
+}
+
+/**
+ * 带冲突重试的推送。
+ * @param {string} apiBase 服务地址
+ * @param {string} token 设备令牌
+ * @param {object} state 完整状态
+ * @param {number} baseUpdatedAt 客户端记录的云端版本号
+ * @param {Function} [fetchLike] 可注入，便于测试
+ */
+async function pushWithRetry(apiBase, token, state, baseUpdatedAt, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  let current = state;
+  let base = Number(baseUpdatedAt || 0);
+  let lastBody = null;
+
+  for (let round = 1; round <= 4; round++) {
+    const res = await doFetch(trimBase(apiBase) + '/api/sync', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify({ data: current, baseUpdatedAt: base })
+    });
+
+    if (res.status === 200) {
+      const body = await res.json();
+      return { ok: true, updatedAt: body.updatedAt, rounds: round, merged: current };
+    }
+
+    if (res.status === 409) {
+      const body = await res.json();
+      current = mergeStates(current, body.data);   // 合并云端改动，绝不覆盖
+      base = Number(body.updatedAt || 0);
+      lastBody = body;
+      continue;
+    }
+
+    let body = {};
+    try { body = await res.json(); } catch (e) {}
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+
+  const err = new Error('conflict_retry_exhausted');
+  err.status = 409;
+  err.body = lastBody;
+  err.merged = current;
+  throw err;
+}
+
+/** 拉取云端状态 */
+async function pull(apiBase, token, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const res = await doFetch(trimBase(apiBase) + '/api/sync', {
+    method: 'GET',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  if (res.status === 401) {
+    const err = new Error('unauthorized');
+    err.status = 401;
+    throw err;
+  }
+  if (!res.ok) {
+    const err = new Error('pull_failed');
+    err.status = res.status;
+    throw err;
+  }
+  const body = await res.json();
+  return { data: body.data, updatedAt: Number(body.updatedAt || 0) };
+}
+
+/** 登录：用口令或备用码换取设备令牌 */
+async function login(apiBase, secret, kind, label, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const res = await doFetch(trimBase(apiBase) + '/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ secret, kind: kind || 'password', label: label || '' })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+/** 探活：确认服务地址可用、是否已初始化 */
+async function health(apiBase, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const res = await doFetch(trimBase(apiBase) + '/api/health', { method: 'GET' });
+  if (!res.ok) {
+    const err = new Error('health_failed');
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/** 本设备登出 / 全部设备登出 */
+async function logout(apiBase, token, allDevices, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const path = allDevices ? '/api/logout-all' : '/api/logout';
+  const res = await doFetch(trimBase(apiBase) + path, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  return res.ok;
+}
+/* __SYNC_CLIENT_END__ */
+
 // ==================== 常量 ====================
 const SUBJECTS = ['语文', '数学', '英语', '科学', '文综'];
 const DEF_VACATIONS = ['寒假', '暑假', '国庆假期', '五一假期', '清明假期', '其他假期'];
@@ -343,6 +674,10 @@ const K_TASKS = 'hw_tasks';
 const K_RECS  = 'hw_records';
 const K_VACS  = 'hw_vacations';
 const K_CUR   = 'hw_current_vacation';
+// 账号与同步
+const K_API   = 'hw_api_base';
+const K_TOKEN = 'hw_device_token';
+const K_UPD   = 'hw_remote_updated_at';
 
 // ==================== 存储层 ====================
 function load(key, fallback) {
@@ -377,6 +712,16 @@ let filterSubject   = '';
 let activeTaskId    = null;
 let collapsedTimer  = false;
 let tickTimer       = null;
+
+// ---------- 同步状态 ----------
+let apiBase         = load(K_API, '') || '';
+let deviceToken     = load(K_TOKEN, '') || '';
+let remoteUpdatedAt = Number(load(K_UPD, 0)) || 0;
+let syncState       = 'local';   // local | idle | syncing | error
+let syncMessage     = '';
+let dirty           = false;     // 是否有尚未推送的本地改动
+let pushTimer       = null;
+let applyingRemote  = false;     // 正在套用云端数据，期间不要回推
 
 // 假期列表兜底
 if (!Array.isArray(vacations) || vacations.length === 0) vacations = DEF_VACATIONS.slice();
@@ -485,7 +830,7 @@ function setVacation(name) {
   save(K_CUR, name);
   activeTaskId = null;
   collapsedTimer = false;
-  renderAll();
+  localChange();
 }
 function addVacation() {
   const name = prompt('新假期名称，如：2026寒假');
@@ -518,7 +863,7 @@ function deleteVacation() {
   currentVacation = vacations[0];
   save(K_CUR, currentVacation);
   activeTaskId = null;
-  renderAll();
+  localChange();
 }
 
 // ==================== 计时逻辑 ====================
@@ -535,7 +880,7 @@ function startTimer(taskId) {
     endSession(false);   // 结束上一段，不计入完成
   } else if (running) {
     activeTaskId = taskId;
-    renderAll();
+    localChange();
     return;
   }
 
@@ -561,12 +906,12 @@ function startTimer(taskId) {
   activeTaskId = taskId;
   collapsedTimer = false;
   save(K_RECS, sessions);
-  renderAll();
+  localChange();
 }
 function pauseTimer() {
   if (!runningSession()) { alert('当前没有正在计时的作业'); return; }
   endSession(false);
-  renderAll();
+  localChange();
   alert('已暂停并记录这段用时。要继续时再点「开始计时」。');
 }
 // finish = true 表示作业完成
@@ -602,7 +947,7 @@ function stopTimer() {
   const name = task ? task.name : '这项作业';
   if (!confirm(`「${name}」完成了吗？\n（确定后会记为已完成作业；如果只是暂时休息请点「暂停计时」）`)) return;
   endSession(true);
-  renderAll();
+  localChange();
 }
 
 // ==================== 作业清单操作 ====================
@@ -628,7 +973,7 @@ function addTask() {
   nameEl.value = '';
   noteEl.value = '';
   nameEl.focus();
-  renderAll();
+  localChange();
 }
 function markDone(taskId) {
   const task = getTask(taskId);
@@ -649,7 +994,7 @@ function markDone(taskId) {
       toast(`「${task.name}」已标记完成，计时器继续给「${runningName}」计时`);
     }
   }
-  renderAll();
+  localChange();
 }
 function undoDone(taskId) {
   const task = getTask(taskId);
@@ -657,7 +1002,7 @@ function undoDone(taskId) {
   task.status = 'pending';
   task.doneTime = null;
   save(K_TASKS, tasks);
-  renderAll();
+  localChange();
 }
 function deleteTask(taskId) {
   const task = getTask(taskId);
@@ -673,7 +1018,7 @@ function deleteTask(taskId) {
   if (activeTaskId === taskId) activeTaskId = null;
   save(K_TASKS, tasks);
   save(K_RECS, sessions);
-  renderAll();
+  localChange();
 }
 function clearDone() {
   const doneTasks = tasks.filter(t => t.status === 'done');
@@ -683,7 +1028,7 @@ function clearDone() {
   // 从清单移除：标记为 archived，历史记录仍可查
   tasks = tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { status: 'archived' }) : t);
   save(K_TASKS, tasks);
-  renderAll();
+  localChange();
 }
 
 // ==================== 渲染 ====================
@@ -694,6 +1039,7 @@ function renderAll() {
   renderPending();
   renderDone();
   renderHistory();
+  renderSyncUI();
 }
 
 function renderVacationSelect() {
@@ -930,6 +1276,421 @@ function exportData() {
   URL.revokeObjectURL(url);
 }
 
+// ==================== 同步：状态与持久化 ====================
+const SYNC_LABEL = {
+  local:   '未登录 · 仅本机',
+  idle:    '已同步',
+  syncing: '同步中…',
+  error:   '同步失败'
+};
+
+function isLoggedIn() { return !!deviceToken; }
+
+function setSyncState(state, message) {
+  syncState = state;
+  syncMessage = message || '';
+  renderSyncUI();
+}
+
+/** 组装当前完整状态（用于合并与推送） */
+function currentState() {
+  return { version: 1, tasks, sessions, vacations, currentVacation };
+}
+
+/** 用（通常是合并后的）状态覆盖内存与本地存储 */
+function applyState(st) {
+  if (!st) return;
+  applyingRemote = true;
+  if (Array.isArray(st.tasks)) tasks = st.tasks;
+  if (Array.isArray(st.sessions)) sessions = st.sessions;
+  if (Array.isArray(st.vacations) && st.vacations.length) vacations = st.vacations;
+  if (st.currentVacation && vacations.includes(st.currentVacation)) currentVacation = st.currentVacation;
+  if (!vacations.includes(currentVacation)) currentVacation = vacations[0];
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+  save(K_VACS, vacations);
+  save(K_CUR, currentVacation);
+  applyingRemote = false;
+  // 正在计时的会话要重新起表（performance.now 基准已变）
+  const running = runningSession();
+  if (running) { running._t0 = now(); activeTaskId = running.taskId; }
+  renderAll();
+}
+
+/** 本地数据发生变更：重绘 + 计划推送 */
+function localChange() {
+  dirty = true;
+  renderAll();
+  schedulePush();
+}
+
+/** 本地数据发生变更：重绘 + 计划推送（套用云端数据期间不触发） */
+function localChangeGuarded() {
+  if (applyingRemote) return;
+  localChange();
+}
+
+function schedulePush() {
+  if (!isLoggedIn()) return;
+  if (pushTimer) clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => { pushTimer = null; doSyncNow(); }, 700);
+}
+
+function describeDevice() {
+  const ua = String(navigator.userAgent || '');
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ? '手机/平板' : '电脑';
+}
+
+/** 同步一次：先拉后推，冲突自动合并 */
+async function doSyncNow() {
+  if (!isLoggedIn()) return;
+  if (syncState === 'syncing') return;
+  setSyncState('syncing');
+
+  try {
+    const remote = await pull(apiBase, deviceToken);
+    let merged = currentState();
+
+    if (remote.data) merged = mergeStates(merged, remote.data);
+
+    if (dirty || !remote.data) {
+      const r = await pushWithRetry(apiBase, deviceToken, merged, remote.updatedAt);
+      remoteUpdatedAt = r.updatedAt;
+      save(K_UPD, remoteUpdatedAt);
+      merged = r.merged;            // 冲突重试时可能带回已合并的最新数据
+      dirty = false;
+      applyState(merged);
+    } else {
+      // 云端有更新、本地没有改动 -> 直接采用合并结果
+      applyState(merged);
+      if (remote.updatedAt !== remoteUpdatedAt) {
+        remoteUpdatedAt = remote.updatedAt;
+        save(K_UPD, remoteUpdatedAt);
+      }
+      dirty = false;
+    }
+    setSyncState('idle');
+  } catch (err) {
+    handleSyncError(err);
+  }
+}
+
+function handleSyncError(err) {
+  if (err && err.status === 401) {
+    // 令牌被吊销（例如在另一台设备点了“在所有设备上退出登录”）
+    deviceToken = '';
+    save(K_TOKEN, '');
+    setSyncState('error', '登录已失效，请重新验证');
+    showLoginModal({ reason: '你的登录已在其他设备上被移除，请重新验证。' });
+    return;
+  }
+  if (err && err.status === 409) {
+    // 反复冲突（极少见）：把已合并的结果落地，绝不丢数据
+    if (err.merged) { applyState(err.merged); dirty = true; }
+    setSyncState('error', '多台设备同时改动，已保留双方数据，请稍后再同步');
+    return;
+  }
+  setSyncState('error', (err && err.message) || '网络错误');
+}
+
+// ==================== 同步：界面 ====================
+function renderSyncUI() {
+  const dot = document.getElementById('acctDot');
+  const text = document.getElementById('acctText');
+  if (dot && text) {
+    let cls = 'local';
+    if (isLoggedIn()) {
+      if (syncState === 'syncing') cls = 'busy';
+      else if (syncState === 'error') cls = 'off';
+      else cls = 'on';
+    }
+    dot.className = 'dot ' + cls;
+    text.textContent = isLoggedIn() ? (SYNC_LABEL[syncState] || '已登录') : SYNC_LABEL.local;
+  }
+
+  const bar = document.getElementById('syncBar');
+  if (!bar) return;
+
+  if (!isLoggedIn()) {
+    bar.innerHTML = `
+      <div class="notice">
+        <div class="grow">📱 现在数据只存在这台设备上。<b>登录后可在手机和电脑之间自动同步</b>：同一账号的作业与计时记录会合并，不会互相覆盖。</div>
+        <button id="barLoginBtn">登录 / 开启同步</button>
+      </div>`;
+    const b = document.getElementById('barLoginBtn');
+    if (b) b.onclick = () => showLoginModal({});
+    return;
+  }
+
+  if (syncState === 'error') {
+    bar.innerHTML = `
+      <div class="notice err">
+        <div class="grow">⚠️ 同步失败：${escapeHtml(syncMessage || '未知原因')}。本地记录完好，没有丢失。</div>
+        <button id="barRetryBtn">重试</button>
+      </div>`;
+    const b = document.getElementById('barRetryBtn');
+    if (b) b.onclick = () => doSyncNow();
+    return;
+  }
+
+  bar.innerHTML = '';
+}
+
+// ==================== 弹窗基础 ====================
+function openModal(html) {
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-mask"><div class="modal">${html}</div></div>`;
+  return root.querySelector('.modal');
+}
+function closeModal() {
+  document.getElementById('modalRoot').innerHTML = '';
+}
+
+/** 登录弹窗：口令 或 一次性备用码 */
+function showLoginModal(opts) {
+  const reason = (opts && opts.reason) || '';
+  const m = openModal(`
+    <h3>登录以同步数据</h3>
+    <div class="desc">
+      ${reason ? `<b style="color:#d33">${escapeHtml(reason)}</b><br>` : ''}
+      同一账号在手机和电脑上登录后，作业清单与计时记录会自动合并同步。<br>
+      还没初始化账号？点最下面的「首次使用」看步骤。
+    </div>
+
+    <label class="field">同步服务地址</label>
+    <input id="mApi" placeholder="https://homework-sync.xxx.workers.dev" value="${escapeHtml(apiBase)}">
+
+    <label class="field">验证方式</label>
+    <select id="mKind">
+      <option value="password">登录口令</option>
+      <option value="backup">一次性备用码</option>
+    </select>
+
+    <label class="field" id="mSecretLabel">登录口令</label>
+    <input id="mSecret" type="password" placeholder="粘贴你的登录口令" autocomplete="off">
+
+    <div class="err" id="mErr"></div>
+    <div class="row">
+      <button id="mCancel" class="ghost">取消</button>
+      <button id="mOk">登录</button>
+    </div>
+    <div class="alt"><a id="mSetupLink">首次使用步骤</a></div>
+  `);
+
+  const kindSel = m.querySelector('#mKind');
+  const secretLabel = m.querySelector('#mSecretLabel');
+  const secretInput = m.querySelector('#mSecret');
+  kindSel.onchange = () => {
+    const isBackup = kindSel.value === 'backup';
+    secretLabel.textContent = isBackup ? '一次性备用码（形如 K7M2-9QXF-3RTB-8WZD）' : '登录口令';
+    secretInput.placeholder = isBackup ? '粘贴备用码' : '粘贴你的登录口令';
+  };
+  m.querySelector('#mCancel').onclick = closeModal;
+  m.querySelector('#mSetupLink').onclick = showSetupModal;
+  m.querySelector('#mOk').onclick = () => doLogin(m);
+  secretInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(m); });
+  secretInput.focus();
+}
+
+async function doLogin(modal) {
+  const errEl = modal.querySelector('#mErr');
+  const btn = modal.querySelector('#mOk');
+  const api = modal.querySelector('#mApi').value.trim();
+  const secret = modal.querySelector('#mSecret').value.trim();
+  const kind = modal.querySelector('#mKind').value;
+
+  errEl.textContent = '';
+  if (!api) { errEl.textContent = '请填写同步服务地址'; return; }
+  if (!secret) { errEl.textContent = '请填写口令或备用码'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '验证中…';
+  try {
+    const r = await login(api, secret, kind, describeDevice());
+    apiBase = api;
+    deviceToken = r.token;
+    save(K_API, apiBase);
+    save(K_TOKEN, deviceToken);
+    closeModal();
+    await firstSyncAfterLogin();
+  } catch (e) {
+    const map = {
+      invalid_secret: '口令或备用码不正确',
+      not_initialized: '服务还没初始化，请先按「首次使用」步骤初始化',
+      unauthorized: '没有权限'
+    };
+    errEl.textContent = map[e.message] || ('登录失败：' + (e.message || '网络错误'));
+    btn.disabled = false;
+    btn.textContent = '登录';
+  }
+}
+
+/** 登录后的第一次同步：云端为空就直接上传；两边都有则让用户选合并方式 */
+async function firstSyncAfterLogin() {
+  setSyncState('syncing', '正在与云端合并…');
+  try {
+    const remote = await pull(apiBase, deviceToken);
+    const hasLocal = tasks.length > 0 || sessions.length > 0;
+
+    if (!remote.data) {
+      const r = await pushWithRetry(apiBase, deviceToken, currentState(), 0);
+      remoteUpdatedAt = r.updatedAt;
+      save(K_UPD, remoteUpdatedAt);
+      dirty = false;
+      setSyncState('idle');
+      toast('已开启同步：本机 ' + tasks.length + ' 项作业已上传');
+      return;
+    }
+
+    if (!hasLocal) {
+      applyState(remote.data);
+      remoteUpdatedAt = remote.updatedAt;
+      save(K_UPD, remoteUpdatedAt);
+      dirty = false;
+      setSyncState('idle');
+      toast('已同步：云端数据已载入本机');
+      return;
+    }
+
+    askFirstSyncChoice(remote);
+  } catch (e) {
+    handleSyncError(e);
+  }
+}
+
+function askFirstSyncChoice(remote) {
+  const localCount = tasks.length;
+  const remoteCount = (remote.data.tasks || []).length;
+  const m = openModal(`
+    <h3>发现两份数据</h3>
+    <div class="desc">
+      这台设备上有 <b>${localCount}</b> 项作业，云端有 <b>${remoteCount}</b> 项。<br>
+      推荐「合并」：两边记录都会保留，同一项作业的计时会累加。
+    </div>
+    <div class="kv">
+      <b>合并</b>：取并集，谁都不会丢（推荐）<br>
+      <b>只用云端</b>：丢弃这台设备上未同步过的记录
+    </div>
+    <div class="err" id="mErr"></div>
+    <div class="row">
+      <button id="mUseRemote" class="ghost">只用云端</button>
+      <button id="mMerge">合并（推荐）</button>
+    </div>
+  `);
+
+  m.querySelector('#mMerge').onclick = async () => {
+    closeModal();
+    setSyncState('syncing', '正在合并…');
+    try {
+      const merged = mergeStates(currentState(), remote.data);
+      const r = await pushWithRetry(apiBase, deviceToken, merged, remote.updatedAt);
+      remoteUpdatedAt = r.updatedAt;
+      save(K_UPD, remoteUpdatedAt);
+      dirty = false;
+      applyState(r.merged);
+      setSyncState('idle');
+      toast('合并完成，两台设备的数据都在了');
+    } catch (e) {
+      handleSyncError(e);
+    }
+  };
+
+  m.querySelector('#mUseRemote').onclick = async () => {
+    closeModal();
+    setSyncState('syncing', '正在采用云端数据…');
+    try {
+      const r = await pushWithRetry(apiBase, deviceToken, remote.data, remote.updatedAt);
+      remoteUpdatedAt = r.updatedAt;
+      save(K_UPD, remoteUpdatedAt);
+      dirty = false;
+      applyState(remote.data);
+      setSyncState('idle');
+      toast('已采用云端数据');
+    } catch (e) {
+      handleSyncError(e);
+    }
+  };
+}
+
+/** 账号面板 */
+function showAccountModal() {
+  const m = openModal(`
+    <h3>账号与同步</h3>
+    <div class="kv">
+      服务地址：<b>${escapeHtml(apiBase || '（未设置）')}</b><br>
+      状态：<b id="mState">${escapeHtml(SYNC_LABEL[syncState] || '')}</b><br>
+      本机作业：<b>${tasks.length}</b> 项 ／ 计时记录：<b>${sessions.length}</b> 段<br>
+      上次同步：<b>${remoteUpdatedAt ? formatTime(remoteUpdatedAt) : '尚未同步'}</b>
+    </div>
+    <div class="desc" style="margin-top:14px">
+      换新手机时，在新设备打开本页，用<b>登录口令</b>或任意一个没用过的<b>备用码</b>验证即可。
+    </div>
+    <div class="err" id="mErr"></div>
+    <div class="row">
+      <button id="mClose" class="ghost">关闭</button>
+      <button id="mSync">立即同步</button>
+    </div>
+    <div class="row">
+      <button id="mSwitch" class="ghost">切换账号</button>
+      <button id="mLogout" class="danger">本机退出登录</button>
+    </div>
+    <div class="alt"><a id="mLogoutAll">在所有设备上退出登录</a></div>
+  `);
+
+  m.querySelector('#mClose').onclick = closeModal;
+  m.querySelector('#mSync').onclick = async () => {
+    m.querySelector('#mState').textContent = '同步中…';
+    await doSyncNow();
+    m.querySelector('#mState').textContent = SYNC_LABEL[syncState] || '';
+    if (syncState === 'error') m.querySelector('#mErr').textContent = syncMessage;
+  };
+  m.querySelector('#mSwitch').onclick = () => {
+    deviceToken = '';
+    save(K_TOKEN, '');
+    setSyncState('idle');
+    closeModal();
+    showLoginModal({});
+  };
+  m.querySelector('#mLogout').onclick = async () => {
+    if (!confirm('本机退出登录？记录会保留在本机，重新登录后可继续同步。')) return;
+    try { await logout(apiBase, deviceToken, false); } catch (e) {}
+    deviceToken = '';
+    save(K_TOKEN, '');
+    dirty = false;
+    setSyncState('local');
+    closeModal();
+    toast('已退出登录，数据仍保留在本机');
+  };
+  m.querySelector('#mLogoutAll').onclick = async () => {
+    if (!confirm('在所有设备上退出登录？之后每台设备都要重新验证口令或备用码。')) return;
+    try { await logout(apiBase, deviceToken, true); } catch (e) {}
+    deviceToken = '';
+    save(K_TOKEN, '');
+    dirty = false;
+    setSyncState('local');
+    closeModal();
+    toast('已让所有设备退出登录');
+  };
+}
+
+/** 首次使用步骤 */
+function showSetupModal() {
+  const m = openModal(`
+    <h3>首次使用：初始化账号</h3>
+    <div class="desc">
+      只需做一次，在你自己的电脑上执行。口令与备用码会显示在<b>你自己的终端</b>里。
+    </div>
+    <div class="codes">cd "~\\Desktop\\self\\vibecoding\\homework\\sync"<br>npm run setup</div>
+    <div class="desc" style="margin-top:12px">
+      这条命令会自动建库、部署并把「登录口令 + 10 个备用码」写到桌面上的
+      <b>作业同步凭据.txt</b>。把它存进密码管理器后删掉文件，
+      再回到这里填服务地址和口令即可。详见 sync/SETUP.md。
+    </div>
+    <div class="row"><button id="mClose2">知道了</button></div>
+  `);
+  m.querySelector('#mClose2').onclick = closeModal;
+}
+
 // ==================== 事件绑定 ====================
 function bind() {
   // 科目下拉
@@ -974,12 +1735,27 @@ function bind() {
       if (!confirm('删除这条计时记录？')) return;
       sessions = sessions.filter(s => s.id !== btn.dataset.id);
       save(K_RECS, sessions);
-      renderAll();
+      localChange();
     }
   });
 
   window.addEventListener('beforeunload', () => {
     if (runningSession()) save(K_RECS, sessions);
+  });
+
+  // 账号按钮
+  document.getElementById('acctBtn').onclick = () => {
+    if (isLoggedIn()) showAccountModal();
+    else showLoginModal({});
+  };
+
+  // 网络恢复后自动补同步
+  // （同样不能先 setSyncState('syncing')，否则会被 doSyncNow 的并发保护挡掉）
+  window.addEventListener('online', () => {
+    if (isLoggedIn()) doSyncNow();
+  });
+  window.addEventListener('offline', () => {
+    if (isLoggedIn()) setSyncState('error', '当前离线，记录会保存在本机并稍后自动同步');
   });
 
   // 若上次关闭页面时正在计时，自动续上
@@ -1004,6 +1780,18 @@ function onListClick(e) {
 function init() {
   bind();
   renderAll();
+
+  // 已登录则启动时同步一次（拉取别的设备上的改动）
+  if (isLoggedIn()) {
+    if (!navigator.onLine) {
+      setSyncState('error', '当前离线，记录会保存在本机并稍后自动同步');
+    } else {
+      // 注意：不要在这里先 setSyncState('syncing')，
+      // doSyncNow 自身有 `if (syncState === 'syncing') return;` 的并发保护，
+      // 先置为 syncing 会让启动同步被自己挡掉，永远不执行。
+      doSyncNow();
+    }
+  }
 }
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);

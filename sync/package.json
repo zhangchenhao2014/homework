@@ -1,0 +1,20 @@
+{
+  "name": "homework-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "作业记录网站的账号与同步后端（Cloudflare Workers + D1）",
+  "type": "module",
+  "scripts": {
+    "setup": "node setup.mjs",
+    "build": "node build-page.mjs",
+    "test": "node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
+    "test:worker": "node test/worker.test.mjs",
+    "test:sync": "node test/sync.test.mjs",
+    "test:page": "node test/page.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:create": "wrangler d1 create homework-sync",
+    "db:local": "wrangler d1 execute homework-sync --local --file=./schema.sql",
+    "db:remote": "wrangler d1 execute homework-sync --remote --file=./schema.sql"
+  }
+}

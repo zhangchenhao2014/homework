@@ -1,0 +1,22 @@
+# 统一换行符，避免 Windows / Linux / macOS 之间出现“整文件都变了”的虚假 diff
+* text=auto eol=lf
+
+# Windows 批处理必须用 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 明确按文本处理
+*.html text
+*.js text
+*.mjs text
+*.css text
+*.md text
+*.sql text
+*.toml text
+*.json text
+
+# 二进制/图片不做换行转换
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary

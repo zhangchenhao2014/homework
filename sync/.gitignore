@@ -1,0 +1,11 @@
+# 依赖与本地缓存
+node_modules/
+.wrangler/
+*.log
+
+# 机密文件：绝不能提交
+.env
+.env.*
+.dev.vars
+*secret*
+*credential*
