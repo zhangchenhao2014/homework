@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "setup": "node setup.mjs",
+    "bootstrap": "node bootstrap-db.mjs",
+    "bootstrap:remote": "node bootstrap-db.mjs --remote",
     "build": "node build-page.mjs",
     "test": "node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
     "test:worker": "node test/worker.test.mjs",
