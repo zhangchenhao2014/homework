@@ -1,22 +1,28 @@
 # ============================================================
-#  Cloudflare Worker 配置
-#  部署前只需改一处：把下面的 database_id 换成你自己的 D1 ID
-#  （执行 npm run db:create 后，命令输出里会给出 database_id）
+#  Cloudflare Pages 配置（当前使用的方式）
+#
+#  为什么不用 Workers：workers.dev 这个域名在国内被 TLS/SNI 层阻断
+#  （换任何 IP 都在握手阶段被重置），而 pages.dev 可以正常访问。
+#  另外 Pages 能把静态页和 API 放在同一个域名下，前端连服务地址都不用手填。
+#
+#  常用命令：
+#    npx wrangler pages dev            # 本地开发（内置 D1）
+#    npx wrangler pages deploy         # 部署，输出 https://<项目名>.pages.dev
+#    npx wrangler pages deployment list
+#
+#  注意：Pages 不支持 --config，所以配置必须放在项目根的 wrangler.toml。
 # ============================================================
 
-name = "homework-sync"
-main = "src/worker.js"
+name = "homework"
+pages_build_output_dir = "assets"
 compatibility_date = "2025-01-01"
 
-# 同步数据存储
 [[d1_databases]]
 binding = "DB"
 database_name = "homework-sync"
 database_id = "b727ebc2-40b2-4540-8b4f-201757f1a910"
 
 [vars]
-# 只允许你自己的 GitHub Pages 域名调用这些接口（改成你的实际网址）
-ALLOWED_ORIGINS = "https://zhangchenhao2014.github.io,http://localhost:18322,http://127.0.0.1:18322"
-
-# 注意：SETUP_TOKEN 不写在这里！它属于机密，用命令行设置：
-#   npx wrangler secret put SETUP_TOKEN
+# 页面与 API 同源后不再需要 CORS；保留 GitHub 来源是为了
+# 旧的 github.io 页面也能调用（可选，不影响使用）。
+ALLOWED_ORIGINS = "https://zhangchenhao2014.github.io,http://127.0.0.1:8788,http://localhost:8788,http://127.0.0.1:8790,http://localhost:8790"

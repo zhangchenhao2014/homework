@@ -753,7 +753,17 @@ let collapsedTimer  = false;
 let tickTimer       = null;
 
 // ---------- 同步状态 ----------
-let apiBase         = load(K_API, '') || '';
+// 当页面与 API 同源时（Cloudflare Pages 部署），默认就用当前站点，
+// 用户无需填写任何地址；只有从其它域名打开时才需要手填。
+function defaultApiBase() {
+  try {
+    if (typeof location !== 'undefined' && /^https?:$/.test(location.protocol)) {
+      return location.origin;
+    }
+  } catch (e) {}
+  return '';
+}
+let apiBase         = load(K_API, '') || defaultApiBase();
 let deviceToken     = load(K_TOKEN, '') || '';
 let remoteUpdatedAt = Number(load(K_UPD, 0)) || 0;
 let syncState       = 'local';   // local | idle | syncing | error
@@ -1488,6 +1498,7 @@ function closeModal() {
 /** 登录弹窗：口令 或 一次性备用码 */
 function showLoginModal(opts) {
   const reason = (opts && opts.reason) || '';
+  const sameOrigin = !!apiBase && apiBase === defaultApiBase();
   const m = openModal(`
     <h3>登录以同步数据</h3>
     <div class="desc">
@@ -1496,8 +1507,13 @@ function showLoginModal(opts) {
       还没初始化账号？点最下面的「首次使用」看步骤。
     </div>
 
-    <label class="field">同步服务地址</label>
-    <input id="mApi" placeholder="https://homework-sync.xxx.workers.dev" value="${escapeHtml(apiBase)}">
+    ${sameOrigin ? `
+      <div class="kv" style="margin-top:12px">同步服务：<b>本站（${escapeHtml(apiBase)}）</b></div>
+      <input type="hidden" id="mApi" value="${escapeHtml(apiBase)}">
+    ` : `
+      <label class="field">同步服务地址</label>
+      <input id="mApi" placeholder="https://homework.xxx.pages.dev" value="${escapeHtml(apiBase)}">
+    `}
 
     <label class="field">验证方式</label>
     <select id="mKind">

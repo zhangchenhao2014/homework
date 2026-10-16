@@ -13,7 +13,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// index.html 是唯一源文件；assets/index.html 是 Pages 的发布副本
 const pagePath = path.join(here, '..', 'index.html');
+const assetsPath = path.join(here, 'assets', 'index.html');
 const clientPath = path.join(here, 'src', 'sync-client.js');
 
 const START = '/* __SYNC_CLIENT_START__ */';
@@ -42,8 +44,13 @@ const scriptMatch = out.match(/<script defer>([\s\S]*?)<\/script>/);
 if (!scriptMatch) { console.error('❌ 找不到 <script defer> 块'); process.exit(1); }
 
 fs.writeFileSync(pagePath, out, 'utf8');
+// 同步一份到 Pages 的发布目录，保证 GitHub Pages 与 Cloudflare Pages 内容一致
+fs.mkdirSync(path.dirname(assetsPath), { recursive: true });
+fs.writeFileSync(assetsPath, out, 'utf8');
 
 const fnNames = [...inlined.matchAll(/^function\s+(\w+)/gm)].map(m => m[1]);
-console.log('✅ 已注入同步引擎到 index.html');
+console.log('✅ 已注入同步引擎');
+console.log('   源文件  : index.html');
+console.log('   发布副本: sync/assets/index.html');
 console.log('   文件大小: ' + html.length + ' -> ' + out.length + ' 字节');
 console.log('   注入函数: ' + fnNames.join(', '));

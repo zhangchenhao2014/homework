@@ -1,6 +1,6 @@
 # 账号与同步 · 部署指南
 
-这个目录是作业记录网站的**账号与同步后端**（Cloudflare Workers + D1）。
+这个目录是作业记录网站的**账号与同步后端**（Cloudflare Pages + D1）。
 部署一次即可，之后手机和电脑登录同一账号就能自动同步。
 
 ---
@@ -9,7 +9,22 @@
 
 GitHub Pages 只能放静态文件，没有服务器和数据库。而"验证你是不是本人"这件事
 **必须由服务端判断** —— 任何写在前端代码里的密码，别人按 F12 就能看到。
-所以登录与数据同步放在 Cloudflare Workers 上。
+
+### 为什么用 Pages 而不是 Workers
+
+一开始用的是 Cloudflare Workers，但 `*.workers.dev` 这个域名在国内
+**被 TLS/SNI 层阻断**：域名解析出来是无效 IP，就算手动指定可用的 Cloudflare IP，
+握手也会被直接重置（`ECONNRESET`）。实测数据：
+
+| 目标 | 结果 |
+|---|---|
+| `xxx.workers.dev`（任意 Cloudflare IP） | ❌ TLS 握手被重置 |
+| `xxx.pages.dev` | ✅ 可正常访问 |
+| `api.cloudflare.com` / `dash.cloudflare.com` | ✅ 正常 |
+
+所以后端迁到 **Cloudflare Pages**（Advanced Mode，用 `_worker.js` 接管请求）。
+额外的好处：Pages 把静态页和 API 放在**同一个域名**下，前端调同源接口，
+**连服务地址都不用填**。
 
 ### 登录机制（不依赖邮箱、不依赖域名）
 
@@ -22,6 +37,14 @@ GitHub Pages 只能放静态文件，没有服务器和数据库。而"验证你
 > 为什么不用邮箱验证码：你没有自己的域名，免费邮件服务通常只能发信到
 > "已验证的收件地址"；而且一旦收不到信就彻底进不去。口令 + 备用码不依赖任何第三方。
 
+### 账号只能在本地创建（重要）
+
+部署后的站点**不提供任何 HTTP 初始化接口**：
+`/api/bootstrap` 因为没配置 `SETUP_TOKEN` 而直接返回 `setup_disabled`。
+
+账号是通过 `bootstrap-db.mjs` **在你本机生成哈希、再经 wrangler 直连数据库写入**的。
+这样公网上没有任何"初始化/重置"入口可以被人利用。
+
 ---
 
 ## 部署（推荐：一条命令）
@@ -33,29 +56,34 @@ cd "C:\Users\章陈镐\Desktop\self\vibecoding\homework\sync"
 npm run setup
 ```
 
-这个脚本会自动完成：登录检查 → 创建数据库 → 写入 `database_id` → 建表 →
-生成并设置 `SETUP_TOKEN` → 部署 → 创建账号 → 把凭据写到桌面。
+这个脚本会自动完成：
+
+1. 检查 Cloudflare 登录状态（未登录会打开浏览器授权）
+2. 准备 D1 数据库（已存在则跳过）
+3. 建立数据表
+4. **离线创建账号**：本地生成口令与备用码、算好哈希，直接写入 D1（不经过 HTTP）
+5. 部署到 Pages，解析出 `*.pages.dev` 地址
+6. 连通性检查
+7. 把凭据写到桌面并自动打开
 
 跑完后会**自动打开桌面的 `作业同步凭据.txt`**，里面是你的登录口令和 10 个备用码。
 
 > ⚠️ **把这两样存进密码管理器**（微信收藏 / 手机备忘录都行），然后**删掉桌面那个文件**。
 > 服务端只有哈希，**丢了谁也找不回来**。
 
-然后打开 https://zhangchenhao2014.github.io/homework/ ，点右上角「账号」，
-填上脚本输出的服务地址 + 口令即可。
+然后打开脚本输出的 `https://homework.<你的子域>.pages.dev`，点右上角「账号」，
+粘贴口令登录即可（服务地址已自动填好，不用管）。
 
-### 如果卡在「部署 Worker」这一步
 
-Cloudflare 要求先注册一个 **workers.dev 子域名**，否则不允许发布。报错长这样：
+### 如果卡在「部署」这一步
 
+Pages 部署不需要注册 workers.dev 子域名，一般不会卡。若报错，看脚本结尾给出的提示。
+
+若提示项目不存在，先手动创建一次（脚本通常会自动处理）：
+
+```powershell
+npx wrangler pages project create homework --production-branch main
 ```
-You need to register a workers.dev subdomain before publishing to workers.dev
-```
-
-处理办法：打开脚本给出的链接（或 https://dash.cloudflare.com → Workers & Pages），
-起一个子域名（随便取，比如你的昵称）并确认，然后**原样重跑 `npm run setup`**。
-
-数据库和机密已经建好了，重跑会自动跳过前面几步，不会重复创建。
 
 ---
 
@@ -79,8 +107,7 @@ npx wrangler login
 npm run db:create
 ```
 
-命令会输出一段包含 `database_id = "xxxx"` 的内容，**把那一长串 ID 复制下来**，
-粘贴替换 `wrangler.toml` 里的 `REPLACE_WITH_YOUR_D1_ID`。
+命令会输出一段包含 `database_id = "xxxx"` 的内容，把它填进 `wrangler.toml`。
 
 ### 3. 建表
 
@@ -88,51 +115,29 @@ npm run db:create
 npm run db:remote
 ```
 
-### 4. 设置初始化令牌（防止别人抢先初始化）
+### 4. 创建账号（离线，不经过 HTTP）
 
 ```powershell
-npx wrangler secret put SETUP_TOKEN
+npm run bootstrap:remote
 ```
 
-按提示输入一串你自己想的随机字符（例如 32 位乱码）。**这个值不要告诉任何人**，
-也不用记，它只在下一步用一次。
+口令与 10 个备用码会写到你桌面的 `作业同步凭据.txt`。
 
-### 5. 部署
+### 5. 部署到 Pages
 
 ```powershell
-npx wrangler deploy
+npm run deploy
 ```
 
-完成后会输出你的服务地址，形如：
+输出形如 `https://homework.<你的子域>.pages.dev` 的地址，那就是你的站点
+（静态页与 API 同一域名，不再有独立的服务地址）。
 
-```
-https://homework-sync.<你的子域>.workers.dev
-```
-
-**把这个地址记下来**，登录时要用。
-
-### 6. 创建账号（只做一次）
-
-把下面的地址换成上一步得到的：
+### 6. 以后改了页面怎么发布
 
 ```powershell
-$api = "https://homework-sync.你的子域.workers.dev"
-$setup = "你在第 4 步设置的 SETUP_TOKEN"
-
-$resp = Invoke-RestMethod -Method Post -Uri "$api/api/bootstrap" `
-  -ContentType "application/json" `
-  -Body (@{ setupToken = $setup; username = "owner" } | ConvertTo-Json)
-
-$resp | ConvertTo-Json -Depth 5 | Out-File -Encoding UTF8 "$env:USERPROFILE\Desktop\作业同步凭据.txt"
-notepad "$env:USERPROFILE\Desktop\作业同步凭据.txt"
+npm run build     # 把最新 index.html 同步到 assets/
+npm run deploy
 ```
-
-桌面文件里是 `password`（登录口令）和 `backupCodes`（10 个一次性备用码）。
-
-### 7. 允许你的网页调用接口
-
-`wrangler.toml` 里的 `ALLOWED_ORIGINS` 已经预填了
-`https://zhangchenhao2014.github.io`。如果你换域名，记得改这里并重新 `npx wrangler deploy`。
 
 </details>
 
@@ -140,28 +145,35 @@ notepad "$env:USERPROFILE\Desktop\作业同步凭据.txt"
 
 ## 开始使用
 
-1. 打开 https://zhangchenhao2014.github.io/homework/
-2. 点右上角 **账号**（或黄色提示条上的"登录 / 开启同步"）
-3. 填服务地址 + 口令 → 登录
+1. 打开脚本输出的站点地址：`https://homework.<你的子域>.pages.dev`
+2. 点右上角 **账号**（或提示条上的"登录 / 开启同步"）
+3. 粘贴**口令** → 登录（服务地址已自动填好）
 4. 若本机和云端都有数据，会让你选**合并**（推荐，两边都不丢）或只用云端
 5. 换新手机时：打开同一网址 → 账号 → 用**口令**或任意一个没用过的**备用码**验证
+
+> 旧的 GitHub Pages 页面（`zhangchenhao2014.github.io/homework/`）仍然能打开，
+> 但它没有后端，只能是"仅本机"。要同步请用 Pages 站点的地址。
 
 ---
 
 ## 安全设计要点
 
-- 口令 / 令牌 / 备用码**一律只存哈希**，数据库泄露也拿不到明文
+- 口令 / 令牌 / 备用码**一律只存哈希**（PBKDF2-SHA256 15 万次迭代 / SHA-256），数据库泄露也拿不到明文
 - 令牌比较使用**定时安全比较**，避免通过响应时间推测
+- **公网上没有任何初始化或重置入口**：`/api/bootstrap` 与 `/api/reset-credentials`
+  都需要 `SETUP_TOKEN`，而 Pages 部署故意不配置它，因此一律返回 `setup_disabled`；
+  建号与改口令只能在你本机经 wrangler 直连数据库完成
 - 同步接口用 `baseUpdatedAt` 做**乐观并发控制**：两台设备同时改不会互相覆盖，
   冲突时自动合并后重试（最多 4 轮）
-- CORS 只放行白名单来源，别的网站无法盗用你的接口
+- CORS 只放行白名单来源；同源部署时其实用不到 CORS
 - 怀疑泄露时：在账号面板点"在所有设备上退出登录"，所有令牌立即失效
 
 ## 常用运维命令
 
 ```powershell
-npm test                                  # 跑后端测试（55 项）
-npx wrangler tail                         # 实时看线上日志
+npm test                    # 三套离线测试（147 项）
+npm run test:e2e            # 对着真实运行的后端跑（45 项）
+npx wrangler pages deployment list
 npx wrangler d1 execute homework-sync --remote --command "SELECT COUNT(*) FROM devices"
 ```
 
@@ -169,4 +181,5 @@ npx wrangler d1 execute homework-sync --remote --command "SELECT COUNT(*) FROM d
 
 - 云端每个账号存**一条 JSON 记录**（作业清单 + 计时记录），上限 1MB
 - 单条计时记录约 200 字节，1MB 够存数千条，正常使用多年无压力
-- Cloudflare 免费额度：D1 每天 500 万次读、10 万次写，个人使用远远用不完
+- Cloudflare 免费额度：D1 每天 500 万次读、10 万次写，Pages 每月 500 次构建，个人用远远够
+

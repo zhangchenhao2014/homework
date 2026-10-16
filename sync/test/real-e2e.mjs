@@ -34,34 +34,62 @@ let initialized;
 }
 
 // ------------------------------------------------------------
-section('2. 初始化账号（真实 PBKDF2 加盐哈希 + 10 个备用码）');
+section('2. 账号准备（离线写入 D1，与 npm run setup 的真实流程一致）');
 let password, codes;
 {
+  // 注意：部署后的 Worker/Pages 不再暴露 HTTP bootstrap 接口
+  // （env.SETUP_TOKEN 为空即返回 setup_disabled），这是有意的安全设计：
+  // 账号只能通过 wrangler 直连数据库创建，公网上没有任何初始化入口。
   const bad = await fetch(API + '/api/bootstrap', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken: 'wrong' })
+    body: JSON.stringify({ setupToken: 'anything' })
   });
-  check('错误 SETUP_TOKEN 被拒绝', bad.status === 403, bad.status);
+  check('HTTP bootstrap 已关闭（setup_disabled）', bad.status === 403, bad.status);
 
-  const res = await fetch(API + '/api/bootstrap', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken: SETUP_TOKEN, username: 'owner' })
-  });
-  const body = await res.json();
-  check('初始化成功', res.status === 200 && body.ok === true, body);
-  check('拿到高熵口令', typeof body.password === 'string' && body.password.length >= 16, body.password?.length);
-  check('拿到 10 个备用码', Array.isArray(body.backupCodes) && body.backupCodes.length === 10, body.backupCodes?.length);
-  password = body.password;
-  codes = body.backupCodes;
+  // 读一下当前状态，决定是否需要建号
+  const h0 = await health(API);
+  if (h0.initialized) {
+    console.log('     （数据库已有账号，直接复用）');
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const credPath = path.join(os.homedir(), 'Desktop', '作业同步凭据.txt');
+    if (!fs.existsSync(credPath)) {
+      console.log('     桌面缺少凭据文件，无法继续。请先跑 npm run bootstrap:remote 或清空数据库。');
+      process.exit(1);
+    }
+    const lines = fs.readFileSync(credPath, 'utf8').split('\n');
+    password = lines[5].trim();
+    codes = [...lines.join('\n').matchAll(/([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})/g)].map(m => m[1]);
+    check('从凭据文件读到口令', password.length >= 16, password.length);
+    check('从凭据文件读到 10 个备用码', codes.length === 10, codes.length);
+  } else {
+    // 数据库还是空的：用离线 bootstrap 建号（与用户实际执行的命令相同）
+    const { spawnSync } = await import('child_process');
+    const { fileURLToPath } = await import('url');
+    const path = await import('path');
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const res = spawnSync('node', ['bootstrap-db.mjs'], {
+      cwd: path.join(here, '..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']
+    });
+    const out = (res.stdout || '') + (res.stderr || '');
+    if (res.status !== 0) {
+      console.log('     bootstrap-db.mjs 失败：');
+      console.log(out.split('\n').slice(-8).join('\n'));
+      process.exit(1);
+    }
+    const fs = await import('fs');
+    const os = await import('os');
+    const credPath = path.join(os.homedir(), 'Desktop', '作业同步凭据.txt');
+    const lines = fs.readFileSync(credPath, 'utf8').split('\n');
+    password = lines[5].trim();
+    codes = [...lines.join('\n').matchAll(/([A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})/g)].map(m => m[1]);
+    check('离线建号成功，读到口令', password.length >= 16, password.length);
+    check('读到 10 个备用码', codes.length === 10, codes.length);
+  }
 
-  const again = await fetch(API + '/api/bootstrap', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken: SETUP_TOKEN })
-  });
-  check('重复初始化被拒（409）', again.status === 409, again.status);
-
-  const h2 = await health(API);
-  check('health 现在 initialized=true', h2.initialized === true, h2);
+  const h1 = await health(API);
+  check('health 现在 initialized=true', h1.initialized === true, h1);
 }
 
 // ------------------------------------------------------------
@@ -77,7 +105,8 @@ let tokenA, tokenB;
   const a = await login(API, password, 'password', '电脑');
   tokenA = a.token;
   check('设备A 登录成功（真实 HTTP + 真实 SQL）', !!tokenA, a);
-  check('返回剩余备用码 10', a.backupCodesLeft === 10, a.backupCodesLeft);
+  check('剩余备用码数量合理（0~10）',
+    a.backupCodesLeft >= 0 && a.backupCodesLeft <= 10, a.backupCodesLeft);
 
   const b = await login(API, password, 'password', '手机');
   tokenB = b.token;
@@ -89,7 +118,9 @@ let tokenA, tokenB;
 section('4. 设备A 上传 → 设备B 拉取到相同数据');
 {
   const stateA = st([task('A1', { name: '电脑上的作业' })], []);
-  const pushed = await pushWithRetry(API, tokenA, stateA, 0);
+  // 先拉到当前版本号，避免库里已有数据导致 409（测试要能在「已有数据的库」上重复跑）
+  const baseline = await pull(API, tokenA);
+  const pushed = await pushWithRetry(API, tokenA, stateA, baseline.updatedAt);
   check('设备A 推送成功', pushed.ok === true && pushed.updatedAt > 0, pushed);
   const v1 = pushed.updatedAt;
 
@@ -127,7 +158,7 @@ section('4. 设备A 上传 → 设备B 拉取到相同数据');
 
   const finalPull = await pull(API, tokenB);
   const names = finalPull.data.tasks.map(t => t.name).sort();
-  check('云端最终含两项作业（不丢数据）',
+  check('云端最终含两台设备的作业（不丢数据）',
     names.includes('电脑上的作业') && names.includes('手机上的作业'), names);
 
   // 5b：id 不同 = 两项不同作业，合并后应各留一份（验证不会误删）
@@ -139,13 +170,18 @@ section('4. 设备A 上传 → 设备B 拉取到相同数据');
 // ------------------------------------------------------------
 section('7. 真实备用码登录（一次性）');
 {
+  // 记录登录前的剩余数量，避免依赖「库是全新的」这个前提
+  const pre = await login(API, password, 'password', '统计用');
+  const beforeLeft = pre.backupCodesLeft;
+
   const ok = await fetch(API + '/api/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ secret: codes[0], kind: 'backup', label: '备用设备' })
   });
   const body = await ok.json();
   check('备用码可登录', ok.status === 200 && body.ok === true, body);
-  check('剩余备用码变为 9', body.backupCodesLeft === 9, body.backupCodesLeft);
+  check('剩余备用码比登录前少 1',
+    body.backupCodesLeft === beforeLeft - 1, [beforeLeft, body.backupCodesLeft]);
 
   const reuse = await fetch(API + '/api/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -210,17 +246,19 @@ section('9. 真实数据边界与安全');
   });
   check('伪造令牌被拒（401）', fake.status === 401, fake.status);
 
+  // 用一个「白名单里一定有的」来源做预检：GitHub Pages 域名始终在 ALLOWED_ORIGINS 中
+  const GOOD_ORIGIN = 'https://zhangchenhao2014.github.io';
   const preflight = await fetch(API + '/api/sync', {
     method: 'OPTIONS',
     headers: {
-      Origin: 'http://127.0.0.1:18323',
+      Origin: GOOD_ORIGIN,
       'Access-Control-Request-Method': 'PUT',
       'Access-Control-Request-Headers': 'authorization,content-type'
     }
   });
   check('CORS 预检返回 204', preflight.status === 204, preflight.status);
-  check('CORS 放行页面来源',
-    preflight.headers.get('Access-Control-Allow-Origin') === 'http://127.0.0.1:18323',
+  check('CORS 放行白名单来源',
+    preflight.headers.get('Access-Control-Allow-Origin') === GOOD_ORIGIN,
     preflight.headers.get('Access-Control-Allow-Origin'));
   check('CORS 允许 Authorization 头',
     String(preflight.headers.get('Access-Control-Allow-Headers') || '').toLowerCase().includes('authorization'),
@@ -234,45 +272,21 @@ section('9. 真实数据边界与安全');
 }
 
 // ------------------------------------------------------------
-section('10. 真实凭据重发（还原首次初始化响应丢失的场景）');
+section('10. 部署后 HTTP 凭据重发已关闭（改为离线流程）');
 {
-  const before = await login(API, password, 'password', '重发前');
-  check('重发前令牌可用', (await pull(API, before.token)).data !== null);
+  const before = await login(API, password, 'password', '检查前');
+  check('口令仍可正常登录', !!before.token, !!before.token);
 
-  const bad = await fetch(API + '/api/reset-credentials', {
+  const r = await fetch(API + '/api/reset-credentials', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken: 'wrong-token' })
+    body: JSON.stringify({ setupToken: 'anything' })
   });
-  check('错误 SETUP_TOKEN 被拒（403）', bad.status === 403, bad.status);
+  check('未配置 SETUP_TOKEN 时重发接口不可用（403）', r.status === 403, r.status);
 
-  const res = await fetch(API + '/api/reset-credentials', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken: SETUP_TOKEN })
-  });
-  const body = await res.json();
-  check('重发成功', res.status === 200 && body.ok === true, body);
-  check('返回新口令与 10 个新备用码',
-    typeof body.password === 'string' && body.password.length >= 16 && body.backupCodes.length === 10,
-    [body.password?.length, body.backupCodes?.length]);
-  check('新口令与旧口令不同', body.password !== password, '口令未变！');
-
-  let threwOld = null;
-  try { await login(API, password, 'password'); } catch (e) { threwOld = e; }
-  check('旧口令失效（401）', threwOld && threwOld.status === 401, threwOld && threwOld.status);
-
-  const fresh = await login(API, body.password, 'password', '重发后');
-  check('新口令可登录', !!fresh.token, !!fresh.token);
-  check('新备用码可用', !!(await login(API, body.backupCodes[0], 'backup')).token);
-
-  let threwCode = null;
-  try { await login(API, codes[5], 'backup'); } catch (e) { threwCode = e; }
-  check('旧备用码作废（401）', threwCode && threwCode.status === 401, threwCode && threwCode.status);
-
-  let threwToken = null;
-  try { await pull(API, before.token); } catch (e) { threwToken = e; }
-  check('重发后旧设备令牌被吊销（401）', threwToken && threwToken.status === 401, threwToken && threwToken.status);
-
-  check('新令牌可用', (await pull(API, fresh.token)).data !== null);
+  // 口令仍然有效（没有被意外改动）
+  const after = await login(API, password, 'password', '检查后');
+  check('口令未被改动', !!after.token, !!after.token);
+  check('原令牌仍可用', (await pull(API, before.token)).data !== null);
 }
 
 // ------------------------------------------------------------

@@ -3,7 +3,7 @@
 //  运行：node test/worker.test.mjs
 // ============================================================
 
-import worker from '../src/worker.js';
+import worker from '../src/api.js';
 import { makeMockD1 } from './mock-d1.js';
 
 let pass = 0, fail = 0;
