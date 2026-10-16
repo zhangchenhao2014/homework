@@ -3,7 +3,8 @@
 //  运行环境：Cloudflare Workers + D1
 //
 //  安全设计：
-//   - 口令用 PBKDF2-SHA256（15 万次迭代）加盐哈希，服务端不存明文
+//   - 口令用 PBKDF2-SHA256（10 万次迭代，Cloudflare WebCrypto 的上限）加盐哈希，
+//     服务端不存明文
 //   - 设备令牌是 32 字节随机值，数据库只存 SHA-256
 //   - 备用码同样只存哈希，用过即标记，不可重用
 //   - 所有受保护接口都必须带 Authorization: Bearer <设备令牌>
@@ -12,10 +13,9 @@
 
 import {
   randomHex, sha256Hex, pbkdf2Hex, timingSafeEqual,
-  makeBackupCode, makePassword, normalizeCode
+  makeBackupCode, makePassword, normalizeCode, PBKDF2_ITERATIONS
 } from './crypto.js';
 
-const PBKDF2_ITERATIONS = 150000;
 const MAX_BLOB_BYTES = 1024 * 1024;   // 单个用户同步数据上限 1MB
 
 // ------------------------------------------------------------

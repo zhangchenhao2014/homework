@@ -137,28 +137,38 @@ step(4, TOTAL, '创建账号（离线写入，不经过 HTTP）');
 step(5, TOTAL, '部署到 Cloudflare Pages');
 let siteUrl = '';
 {
+  // 先确保项目存在（wrangler pages deploy 不会自动建项目，
+  // 之前依赖报错文案去补救，文案一变就失效 —— 改为主动检查）
+  const listOut = wrangler(['pages', 'project', 'list', '--json']);
+  let exists = false;
+  try {
+    const start = listOut.out.indexOf('[');
+    const projects = JSON.parse(listOut.out.slice(start));
+    exists = projects.some(p => (p['Project Name'] || p.name) === PROJECT);
+  } catch (e) { exists = /homework/.test(listOut.out); }
+
+  if (!exists) {
+    console.log(c.y('项目不存在，正在创建…'));
+    const cr = wrangler(['pages', 'project', 'create', PROJECT, '--production-branch', 'main']);
+    console.log(c.d(cr.out.trim().split('\n').slice(-5).join('\n')));
+    if (cr.code !== 0 && !/already exists/i.test(cr.out)) {
+      console.log(c.r('✗ 创建 Pages 项目失败：'));
+      console.log(c.d(cr.out.trim().split('\n').slice(-12).join('\n')));
+      process.exit(1);
+    }
+    console.log(c.g('✓ 项目已创建'));
+  } else {
+    console.log(c.g('✓ 项目已存在') + c.d(' (' + PROJECT + ')'));
+  }
+
   const r = wrangler(['pages', 'deploy', 'assets', '--project-name', PROJECT, '--branch', 'main', '--commit-dirty=true']);
   const m = r.out.match(/https:\/\/[a-z0-9-]+\.pages\.dev/i);
   if (r.code !== 0 || !m) {
-    // 首次部署时项目可能还不存在，wrangler 会提示需要创建
-    if (/project not found|does not exist/i.test(r.out)) {
-      console.log(c.y('项目尚不存在，正在创建…'));
-      const cr = wrangler(['pages', 'project', 'create', PROJECT, '--production-branch', 'main']);
-      console.log(c.d(cr.out.trim().split('\n').slice(-6).join('\n')));
-      const r2 = wrangler(['pages', 'deploy', 'assets', '--project-name', PROJECT, '--branch', 'main', '--commit-dirty=true']);
-      const m2 = r2.out.match(/https:\/\/[a-z0-9-]+\.pages\.dev/i);
-      if (m2) {
-        siteUrl = m2[0].replace(/\/+$/, '');
-      }
-    }
-    if (!siteUrl) {
-      console.log(c.r('✗ 部署失败：'));
-      console.log(c.d(r.out.trim().split('\n').slice(-20).join('\n')));
-      process.exit(1);
-    }
-  } else {
-    siteUrl = m[0].replace(/\/+$/, '');
+    console.log(c.r('✗ 部署失败：'));
+    console.log(c.d(r.out.trim().split('\n').slice(-20).join('\n')));
+    process.exit(1);
   }
+  siteUrl = m[0].replace(/\/+$/, '');
   console.log(c.g('✓ 站点地址：') + c.b(siteUrl));
   try { fs.writeFileSync(path.join(here, '.site-url'), siteUrl + '\n', 'utf8'); } catch (e) {}
 }

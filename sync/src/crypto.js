@@ -19,13 +19,20 @@ export async function sha256Hex(text) {
 }
 
 /** PBKDF2-SHA256 派生口令密钥（用于人类可读的口令，需要慢哈希） */
-export async function pbkdf2Hex(password, saltHex, iterations = 150000) {
+// PBKDF2 迭代次数。
+// 重要：Cloudflare Workers/Pages 的 WebCrypto 实现**上限是 100000**，
+// 超过会抛 "Pbkdf2 failed: iteration counts above 100000 are not supported"。
+// Node 没有这个限制，所以本地测试不会暴露该问题 —— 必须硬性卡在 100000。
+export const PBKDF2_ITERATIONS = 100000;
+
+export async function pbkdf2Hex(password, saltHex, iterations = PBKDF2_ITERATIONS) {
+  const iter = Math.min(Number(iterations) || PBKDF2_ITERATIONS, 100000);
   const keyMaterial = await crypto.subtle.importKey(
     'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
   );
   const salt = hexToBytes(saltHex);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' },
     keyMaterial,
     256
   );

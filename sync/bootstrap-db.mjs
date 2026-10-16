@@ -15,7 +15,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { pbkdf2Hex, sha256Hex, randomHex, makePassword, makeBackupCode, normalizeCode } from './src/crypto.js';
+import { pbkdf2Hex, sha256Hex, randomHex, makePassword, makeBackupCode, normalizeCode, PBKDF2_ITERATIONS } from './src/crypto.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REMOTE = process.argv.includes('--remote');
@@ -63,7 +63,9 @@ console.log(c.b('\n生成凭据（口令 → PBKDF2 哈希，备用码 → SHA-2
 const userId = randomHex(16);
 const password = makePassword();
 const salt = randomHex(16);
-const ITER = 150000;
+// 注意：Cloudflare 的 WebCrypto 上限是 100000 次迭代，超过会在【登录时】抛错
+// （建号只写哈希不校验，所以建号时看不出来 —— 这个坑踩过一次）
+const ITER = PBKDF2_ITERATIONS;
 const pwdHash = await pbkdf2Hex(password, salt, ITER);
 
 const codes = [];
