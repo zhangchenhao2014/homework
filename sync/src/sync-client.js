@@ -67,10 +67,57 @@ export function mergeVacations(a, b) {
   return out;
 }
 
+/**
+ * 合并「已删除标记」（tombstone）。
+ *
+ * 为什么需要它：合并规则是「按 id 取并集」，只能表达"这个 id 存在"，
+ * 无法表达"这个 id 已被删除"。于是只要还有任意一份旧副本
+ * （另一台设备、或另一个还开着的标签页）参与同步，被删的项就会被
+ * 并集加回来 —— 表现就是「删不掉」。
+ *
+ * 做法：每次删除都记下 id 与删除时刻；合并时取两边删除记录的并集
+ * （同一 id 取删除时间较晚的那个）；最后把命中删除标记的条目剔除。
+ */
+export function mergeDeleted(a, b) {
+  const out = {};
+  for (const src of [a, b]) {
+    if (!src || typeof src !== 'object') continue;
+    for (const [id, ts] of Object.entries(src)) {
+      const t = Number(ts) || 0;
+      if (!(id in out) || t > out[id]) out[id] = t;
+    }
+  }
+  return out;
+}
+
+// 删除标记的保留时长。留足够久以覆盖"设备长期离线后回来同步"的情况，
+// 过期后自动丢弃，避免云端数据无限膨胀。
+export const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;   // 90 天
+
+/** 丢弃过期的删除标记 */
+export function pruneDeleted(deleted, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const out = {};
+  for (const [id, ts] of Object.entries(deleted || {})) {
+    if (now - (Number(ts) || 0) < TOMBSTONE_TTL_MS) out[id] = Number(ts) || 0;
+  }
+  return out;
+}
+
+/** 按删除标记过滤掉已删除的条目 */
+function dropDeleted(list, deleted) {
+  if (!deleted) return list || [];
+  return (list || []).filter(x => x && !(x.id in deleted));
+}
+
 /** 合并两个完整状态 */
 export function mergeStates(localState, remoteState) {
   const local = localState || {};
   const remote = remoteState || {};
+
+  // 先合并删除标记，再用它过滤，最后才做 id 并集
+  const deleted = pruneDeleted(mergeDeleted(local.deletedTasks, remote.deletedTasks));
+
   let sessions = mergeById(local.sessions, remote.sessions, pickSession);
 
   // 两台设备可能各自留下一个“计时中”，合并后只保留开始较晚的一个
@@ -89,10 +136,11 @@ export function mergeStates(localState, remoteState) {
   }
 
   return {
-    tasks: mergeById(local.tasks, remote.tasks, pickTask),
-    sessions,
+    tasks: dropDeleted(mergeById(local.tasks, remote.tasks, pickTask), deleted),
+    sessions: dropDeleted(sessions, deleted),
     vacations: mergeVacations(local.vacations, remote.vacations),
-    currentVacation: local.currentVacation || remote.currentVacation || ''
+    currentVacation: local.currentVacation || remote.currentVacation || '',
+    deletedTasks: deleted
   };
 }
 

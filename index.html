@@ -512,10 +512,57 @@ function mergeVacations(a, b) {
   return out;
 }
 
+/**
+ * 合并「已删除标记」（tombstone）。
+ *
+ * 为什么需要它：合并规则是「按 id 取并集」，只能表达"这个 id 存在"，
+ * 无法表达"这个 id 已被删除"。于是只要还有任意一份旧副本
+ * （另一台设备、或另一个还开着的标签页）参与同步，被删的项就会被
+ * 并集加回来 —— 表现就是「删不掉」。
+ *
+ * 做法：每次删除都记下 id 与删除时刻；合并时取两边删除记录的并集
+ * （同一 id 取删除时间较晚的那个）；最后把命中删除标记的条目剔除。
+ */
+function mergeDeleted(a, b) {
+  const out = {};
+  for (const src of [a, b]) {
+    if (!src || typeof src !== 'object') continue;
+    for (const [id, ts] of Object.entries(src)) {
+      const t = Number(ts) || 0;
+      if (!(id in out) || t > out[id]) out[id] = t;
+    }
+  }
+  return out;
+}
+
+// 删除标记的保留时长。留足够久以覆盖"设备长期离线后回来同步"的情况，
+// 过期后自动丢弃，避免云端数据无限膨胀。
+const TOMBSTONE_TTL_MS = 90 * 24 * 60 * 60 * 1000;   // 90 天
+
+/** 丢弃过期的删除标记 */
+function pruneDeleted(deleted, nowMs) {
+  const now = Number(nowMs) || Date.now();
+  const out = {};
+  for (const [id, ts] of Object.entries(deleted || {})) {
+    if (now - (Number(ts) || 0) < TOMBSTONE_TTL_MS) out[id] = Number(ts) || 0;
+  }
+  return out;
+}
+
+/** 按删除标记过滤掉已删除的条目 */
+function dropDeleted(list, deleted) {
+  if (!deleted) return list || [];
+  return (list || []).filter(x => x && !(x.id in deleted));
+}
+
 /** 合并两个完整状态 */
 function mergeStates(localState, remoteState) {
   const local = localState || {};
   const remote = remoteState || {};
+
+  // 先合并删除标记，再用它过滤，最后才做 id 并集
+  const deleted = pruneDeleted(mergeDeleted(local.deletedTasks, remote.deletedTasks));
+
   let sessions = mergeById(local.sessions, remote.sessions, pickSession);
 
   // 两台设备可能各自留下一个“计时中”，合并后只保留开始较晚的一个
@@ -534,10 +581,11 @@ function mergeStates(localState, remoteState) {
   }
 
   return {
-    tasks: mergeById(local.tasks, remote.tasks, pickTask),
-    sessions,
+    tasks: dropDeleted(mergeById(local.tasks, remote.tasks, pickTask), deleted),
+    sessions: dropDeleted(sessions, deleted),
     vacations: mergeVacations(local.vacations, remote.vacations),
-    currentVacation: local.currentVacation || remote.currentVacation || ''
+    currentVacation: local.currentVacation || remote.currentVacation || '',
+    deletedTasks: deleted
   };
 }
 
@@ -717,6 +765,7 @@ const K_CUR   = 'hw_current_vacation';
 const K_API   = 'hw_api_base';
 const K_TOKEN = 'hw_device_token';
 const K_UPD   = 'hw_remote_updated_at';
+const K_DEL   = 'hw_deleted_tasks';   // 删除标记（tombstone）：id -> 删除时刻
 
 // ==================== 存储层 ====================
 function load(key, fallback) {
@@ -766,6 +815,10 @@ function defaultApiBase() {
 let apiBase         = load(K_API, '') || defaultApiBase();
 let deviceToken     = load(K_TOKEN, '') || '';
 let remoteUpdatedAt = Number(load(K_UPD, 0)) || 0;
+// 删除标记：{ 作业id: 删除时刻 }。它必须参与同步，
+// 否则别的设备一推旧副本就会把已删的作业「复活」。
+let deletedTasks    = load(K_DEL, {}) || {};
+if (typeof deletedTasks !== 'object' || Array.isArray(deletedTasks)) deletedTasks = {};
 let syncState       = 'local';   // local | idle | syncing | error
 let syncMessage     = '';
 let dirty           = false;     // 是否有尚未推送的本地改动
@@ -904,6 +957,8 @@ function deleteVacation() {
   sessions = sessions.filter(s => s.vacation !== name && !ids.includes(s.taskId));
   vacations = vacations.filter(v => v !== name);
   if (vacations.length === 0) vacations = DEF_VACATIONS.slice();
+  // 一并记删除标记，避免其它设备把整个假期连同作业推回来
+  markDeleted(ids);
 
   save(K_TASKS, tasks);
   save(K_RECS, sessions);
@@ -1065,6 +1120,8 @@ function deleteTask(taskId) {
   tasks = tasks.filter(t => t.id !== taskId);
   sessions = sessions.filter(s => s.taskId !== taskId);
   if (activeTaskId === taskId) activeTaskId = null;
+  // 记下删除标记：否则别的设备（或另一个还开着的标签页）一同步就会把它加回来
+  markDeleted([taskId]);
   save(K_TASKS, tasks);
   save(K_RECS, sessions);
   localChange();
@@ -1079,7 +1136,6 @@ function clearDone() {
   save(K_TASKS, tasks);
   localChange();
 }
-
 // ==================== 渲染 ====================
 function renderAll() {
   renderVacationSelect();
@@ -1343,7 +1399,16 @@ function setSyncState(state, message) {
 
 /** 组装当前完整状态（用于合并与推送） */
 function currentState() {
-  return { version: 1, tasks, sessions, vacations, currentVacation };
+  return { version: 1, tasks, sessions, vacations, currentVacation, deletedTasks };
+}
+
+/** 记下删除标记（作业 id 列表） */
+function markDeleted(ids) {
+  const ts = Date.now();
+  for (const id of (ids || [])) {
+    if (id) deletedTasks[id] = ts;
+  }
+  save(K_DEL, deletedTasks);
 }
 
 /** 用（通常是合并后的）状态覆盖内存与本地存储 */
@@ -1355,6 +1420,11 @@ function applyState(st) {
   if (Array.isArray(st.vacations) && st.vacations.length) vacations = st.vacations;
   if (st.currentVacation && vacations.includes(st.currentVacation)) currentVacation = st.currentVacation;
   if (!vacations.includes(currentVacation)) currentVacation = vacations[0];
+  // 删除标记也要落地，否则刷新后又把已删的作业带回来
+  if (st.deletedTasks && typeof st.deletedTasks === 'object') {
+    deletedTasks = mergeDeleted(deletedTasks, st.deletedTasks);
+    save(K_DEL, deletedTasks);
+  }
   save(K_TASKS, tasks);
   save(K_RECS, sessions);
   save(K_VACS, vacations);
@@ -1789,6 +1859,8 @@ function bind() {
     if (btn.dataset.action === 'delrec') {
       if (!confirm('删除这条计时记录？')) return;
       sessions = sessions.filter(s => s.id !== btn.dataset.id);
+      // 计时记录也记删除标记（同一张标记表，按 id 区分）
+      markDeleted([btn.dataset.id]);
       save(K_RECS, sessions);
       localChange();
     }
