@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>假期作业记录</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8;
+    color: #333;
+    padding: 20px 20px 60px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #999; margin-bottom: 16px; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .card-title .hint { font-size: 12px; color: #aaa; font-weight: 400; }
+  .card-title .spacer { flex: 1; }
+  .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  input, select, button {
+    font-size: 15px;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    outline: none;
+    background: #fff;
+    color: #333;
+  }
+  input, select { flex: 1; min-width: 110px; }
+  input:focus, select:focus { border-color: #4a7cff; }
+  button {
+    background: #4a7cff;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: .2s;
+    white-space: nowrap;
+  }
+  button:hover { background: #3a6aee; }
+  button.danger { background: #ff5a5a; }
+  button.danger:hover { background: #ee4a4a; }
+  button.ghost { background: #eef0f4; color: #555; }
+  button.ghost:hover { background: #e2e6ec; }
+  button.mini { font-size: 13px; padding: 6px 10px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* 顶部假期栏 */
+  .vacation-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    background: #fff;
+    border-radius: 12px;
+    padding: 12px 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .vacation-bar label { font-size: 13px; color: #888; }
+  .vacation-bar select { max-width: 200px; flex: 0 1 auto; }
+
+  /* 计时器 */
+  #timerCard { border: 1px solid #dfe6ff; background: linear-gradient(180deg,#fbfcff,#fff); }
+  .timer-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .timer-name { font-weight: 700; font-size: 17px; }
+  .timer-meta { font-size: 13px; color: #888; }
+  .timer-time {
+    font-size: 40px;
+    font-weight: 700;
+    color: #4a7cff;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+    margin: 6px 0 12px;
+  }
+  .timer-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .paused-time { font-size: 24px; color: #ff9500; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* 作业清单 */
+  /* 作业条目：左侧勾选列 + 右侧内容列（内容列内部可换行） */
+  .task {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 11px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .task:last-child { border-bottom: none; }
+  .task-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .task-main { flex: 1 1 190px; min-width: 0; }
+  .task-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .task-name { font-weight: 600; word-break: break-word; }
+  .task-meta { font-size: 12px; color: #999; margin-top: 3px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .task-time { font-size: 13px; color: #4a7cff; font-weight: 600; white-space: nowrap; }
+  /* 复选框 */
+  .check {
+    width: 22px; height: 22px;
+    min-width: 22px;
+    border: 2px solid #d5d9e0;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    color: transparent;
+    transition: .15s;
+    user-select: none;
+    background: #fff;
+  }
+  .check:hover { border-color: #4a7cff; color: #c9d4ff; }
+  .check.checked { background: #4a7cff; border-color: #4a7cff; color: #fff; }
+
+  .group-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #666;
+    margin: 14px 0 2px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .group-title:first-child { margin-top: 0; }
+  .group-title .count { font-weight: 400; color: #aaa; }
+
+  /* 统计 */
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; }
+  .stat-item { flex: 1; min-width: 100px; }
+  .stat-num { font-size: 24px; font-weight: 700; color: #4a7cff; }
+  .stat-label { font-size: 13px; color: #888; margin-top: 4px; }
+  .progress-wrap { margin-top: 14px; }
+  .progress-bar { height: 8px; background: #eef0f4; border-radius: 6px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg,#4a7cff,#7aa2ff); width: 0; transition: width .3s; }
+  .progress-text { font-size: 12px; color: #888; margin-top: 6px; }
+
+  .subject-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip {
+    font-size: 12px;
+    background: #f4f6fa;
+    border-radius: 20px;
+    padding: 5px 12px;
+    color: #555;
+  }
+  .chip b { color: #4a7cff; }
+
+  /* 历史 */
+  .filter-row { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  .filter-row select { max-width: 130px; }
+  .record {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid #f0f0f0;
+    gap: 12px;
+  }
+  .record:last-child { border-bottom: none; }
+  .record-info { flex: 1; min-width: 0; }
+  .record-name { font-weight: 600; margin-bottom: 4px; word-break: break-all; }
+  .record-meta { font-size: 13px; color: #888; }
+  .record-time { font-size: 15px; color: #4a7cff; font-weight: 600; white-space: nowrap; }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: #eef2ff;
+    color: #4a7cff;
+    margin-right: 4px;
+  }
+  .badge.doing { background: #fff4e5; color: #ff9500; }
+  .badge.vacation { background: #eafaf1; color: #17a45f; }
+  .empty { text-align: center; color: #aaa; padding: 26px 0; font-size: 14px; }
+
+  /* 轻提示 */
+  #toastBox {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    z-index: 99;
+    pointer-events: none;
+  }
+  .toast {
+    background: rgba(45,50,60,.94);
+    color: #fff;
+    font-size: 14px;
+    padding: 10px 18px;
+    border-radius: 22px;
+    max-width: 88vw;
+    text-align: center;
+    animation: toastIn .2s ease-out;
+    box-shadow: 0 4px 16px rgba(0,0,0,.18);
+  }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  @media (max-width: 480px) {
+    body { padding: 14px 12px 60px; }
+    h1 { font-size: 20px; }
+    .timer-time { font-size: 34px; }
+    input, select, button { font-size: 14px; }
+    .card { padding: 14px; }
+    .stat-num { font-size: 21px; }
+    /* 窄屏：内容列内按钮换行到标题下方，左侧勾选圈始终对齐标题 */
+    .task-actions { flex: 1 1 100%; }
+    .task-actions > button { flex: 1 1 0; }
+  }
+</style>
+</head>
+<body>
+
+<h1>📚 假期作业记录</h1>
+<div class="subtitle">先建清单 → 点作业开始计时 → 完成后打勾</div>
+
+<!-- 当前假期 -->
+<div class="vacation-bar">
+  <label>当前假期</label>
+  <select id="vacationSelect"></select>
+  <button class="ghost mini" id="newVacationBtn">＋ 新建假期</button>
+  <button class="ghost mini" id="delVacationBtn">删除该假期</button>
+</div>
+
+<!-- 计时器 -->
+<div class="card" id="timerCard" style="display:none;">
+  <div class="timer-head">
+    <div class="timer-name" id="timerName"></div>
+    <div class="timer-meta" id="timerMeta"></div>
+  </div>
+  <div class="timer-time" id="timerTime">00:00:00</div>
+  <div class="timer-actions">
+    <button id="timerBtn">开始计时</button>
+    <button class="ghost" id="pauseBtn">暂停计时</button>
+    <button class="ghost" id="timerCloseBtn">收起</button>
+  </div>
+</div>
+
+<!-- 添加作业 -->
+<div class="card">
+  <div class="card-title">添加作业到清单 <span class="hint">假期开始时把作业统一录进来</span></div>
+  <div class="form-row">
+    <select id="taskSubject"></select>
+    <input id="taskName" placeholder="作业名称，如：数学卷子第3套">
+    <input id="taskNote" placeholder="备注（选填），如：共20页" style="max-width:180px;">
+    <button id="addBtn">加入清单</button>
+  </div>
+</div>
+
+<!-- 统计 -->
+<div class="card">
+  <div class="card-title" id="statsTitle">作业进度</div>
+  <div class="stats">
+    <div class="stat-item">
+      <div class="stat-num" id="statCount">0</div>
+      <div class="stat-label">已完成作业</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" id="statPending">0</div>
+      <div class="stat-label">未完成作业</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" id="statTotal">0分</div>
+      <div class="stat-label">累计用时</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-num" id="statToday">0分</div>
+      <div class="stat-label">今日用时</div>
+    </div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">还没有作业，先添加吧</div>
+  </div>
+  <div class="subject-stats" id="subjectStats"></div>
+</div>
+
+<!-- 未完成作业清单 -->
+<div class="card">
+  <div class="card-title">
+    <span id="pendingTitle">未完成作业清单</span>
+    <span class="hint">点击「开始计时」进入计时，点左侧圆圈可直接标记完成</span>
+  </div>
+  <div id="pendingList"></div>
+</div>
+
+<!-- 已完成 -->
+<div class="card">
+  <div class="card-title">
+    <span id="doneTitle">已完成作业</span>
+    <button class="ghost mini" id="clearDoneBtn">清空已完成</button>
+  </div>
+  <div id="doneList"></div>
+</div>
+
+<!-- 历史记录 -->
+<div class="card">
+  <div class="card-title">
+    历史计时记录
+    <span class="spacer"></span>
+    <button class="ghost mini" id="exportBtn">导出数据</button>
+  </div>
+  <div class="filter-row">
+    <select id="filterVacation"><option value="">全部假期</option></select>
+    <select id="filterSubject"><option value="">全部科目</option></select>
+  </div>
+  <div id="recordList"></div>
+</div>
+
+<div id="toastBox"></div>
+
+<script defer>
+// ==================== 常量 ====================
+const SUBJECTS = ['语文', '数学', '英语', '科学', '文综'];
+const DEF_VACATIONS = ['寒假', '暑假', '国庆假期', '五一假期', '清明假期', '其他假期'];
+
+const K_TASKS = 'hw_tasks';
+const K_RECS  = 'hw_records';
+const K_VACS  = 'hw_vacations';
+const K_CUR   = 'hw_current_vacation';
+
+// ==================== 存储层 ====================
+function load(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('读取失败', key, e);
+    return fallback;
+  }
+}
+function save(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    alert('保存失败，可能是浏览器存储空间已满');
+    console.error('保存失败', key, e);
+  }
+}
+function uid() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+// ==================== 全局状态 ====================
+let tasks     = load(K_TASKS, []);
+let sessions  = load(K_RECS, []);                       // 每次计时的记录
+let vacations = load(K_VACS, DEF_VACATIONS.slice());
+let currentVacation = load(K_CUR, null);
+let filterVacation  = '';
+let filterSubject   = '';
+let activeTaskId    = null;
+let collapsedTimer  = false;
+let tickTimer       = null;
+
+// 假期列表兜底
+if (!Array.isArray(vacations) || vacations.length === 0) vacations = DEF_VACATIONS.slice();
+if (!vacations.includes(currentVacation)) currentVacation = vacations[0];
+if (!Array.isArray(tasks) || !Array.isArray(sessions)) { tasks = []; sessions = []; }
+
+// 记录里的假期字段兜底（兼容旧数据）
+let migrated = false;
+sessions.forEach(s => {
+  if (!s.vacation) { s.vacation = currentVacation; migrated = true; }
+});
+// 作业的假期字段兜底
+tasks.forEach(t => {
+  if (!t.vacation) { t.vacation = currentVacation; migrated = true; }
+  if (!t.status) { t.status = 'pending'; migrated = true; }
+});
+if (migrated) {
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+}
+
+// ==================== 工具函数 ====================
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '0分';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}小时${m}分`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+function formatTimer(ms) {
+  if (!ms || ms < 0) ms = 0;
+  const totalSec = Math.floor(ms / 1000);
+  const h = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+  const m = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+  const s = String(totalSec % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+function formatTime(ts) {
+  if (!ts) return '--';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+function formatDate(ts) {
+  if (!ts) return '--';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+function isToday(ts) {
+  if (!ts) return false;
+  return new Date(ts).toDateString() === new Date().toDateString();
+}
+function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, m => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[m]));
+}
+function now() {
+  const perf = (typeof performance !== 'undefined' && performance)
+    ? performance
+    : (window && window.performance) || null;
+  return (perf && typeof perf.now === 'function') ? perf.now() : Date.now();
+}
+// 轻提示（不打断操作，2.6 秒后自动消失）
+function toast(message) {
+  const box = document.getElementById('toastBox');
+  if (!box) return;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = message;
+  box.appendChild(el);
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, 2600);
+}
+
+// ==================== 查询辅助 ====================
+function getTask(id) { return tasks.find(t => t.id === id) || null; }
+function runningSession() { return sessions.find(s => s.status === 'doing') || null; }
+function runningTask() {
+  const s = runningSession();
+  return s ? getTask(s.taskId) : null;
+}
+// 某个作业累计用时 = 所有已完成计时段之和
+function taskAccumulated(taskId) {
+  return sessions
+    .filter(s => s.taskId === taskId && s.status === 'done')
+    .reduce((sum, s) => sum + (s.duration || 0), 0);
+}
+function activeTask() {
+  if (activeTaskId && getTask(activeTaskId)) return getTask(activeTaskId);
+  const pending = tasks.filter(t => t.status !== 'done');
+  return pending[0] || null;
+}
+// 当前显示的假期过滤：'' 表示全部
+function taskVacations() {
+  const fromTasks = tasks.map(t => t.vacation).filter(Boolean);
+  return [...new Set(vacations.concat(fromTasks))];
+}
+
+// ==================== 假期操作 ====================
+function setVacation(name) {
+  currentVacation = name;
+  save(K_CUR, name);
+  activeTaskId = null;
+  collapsedTimer = false;
+  renderAll();
+}
+function addVacation() {
+  const name = prompt('新假期名称，如：2026寒假');
+  if (!name) return;
+  const clean = name.trim();
+  if (!clean) return;
+  if (!vacations.includes(clean)) {
+    vacations.push(clean);
+    save(K_VACS, vacations);
+  }
+  setVacation(clean);
+}
+function deleteVacation() {
+  const name = currentVacation;
+  const related = tasks.filter(t => t.vacation === name).length;
+  if (!confirm(related > 0
+    ? `「${name}」下还有 ${related} 项作业，删除假期会一并删除这些作业和计时记录，确定吗？`
+    : `确定删除假期「${name}」吗？`)) return;
+
+  const ids = tasks.filter(t => t.vacation === name).map(t => t.id);
+  tasks = tasks.filter(t => t.vacation !== name);
+  sessions = sessions.filter(s => s.vacation !== name && !ids.includes(s.taskId));
+  vacations = vacations.filter(v => v !== name);
+  if (vacations.length === 0) vacations = DEF_VACATIONS.slice();
+
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+  save(K_VACS, vacations);
+
+  currentVacation = vacations[0];
+  save(K_CUR, currentVacation);
+  activeTaskId = null;
+  renderAll();
+}
+
+// ==================== 计时逻辑 ====================
+function startTimer(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  if (task.status === 'done') { alert('这项作业已经完成了'); return; }
+
+  const running = runningSession();
+  if (running && running.taskId !== taskId) {
+    const rTask = getTask(running.taskId);
+    const label = rTask ? rTask.name : '上一项作业';
+    if (!confirm(`「${label}」正在计时，要先结束它并开始「${task.name}」吗？`)) return;
+    endSession(false);   // 结束上一段，不计入完成
+  } else if (running) {
+    activeTaskId = taskId;
+    renderAll();
+    return;
+  }
+
+  const existing = sessions.find(s => s.taskId === taskId && s.status === 'doing');
+  const session = existing || {
+    id: uid(),
+    taskId,
+    taskName: task.name,
+    subject: task.subject,
+    vacation: task.vacation,
+    startTime: Date.now(),
+    endTime: null,
+    duration: 0,
+    status: 'doing'
+  };
+  if (!existing) {
+    session._t0 = now();
+    sessions.unshift(session);
+  } else {
+    session._t0 = now();
+  }
+
+  activeTaskId = taskId;
+  collapsedTimer = false;
+  save(K_RECS, sessions);
+  renderAll();
+}
+function pauseTimer() {
+  if (!runningSession()) { alert('当前没有正在计时的作业'); return; }
+  endSession(false);
+  renderAll();
+  alert('已暂停并记录这段用时。要继续时再点「开始计时」。');
+}
+// finish = true 表示作业完成
+function endSession(finish) {
+  const session = runningSession();
+  if (!session) return;
+  const t0 = session._t0 != null ? session._t0 : now();
+  const elapsed = Math.max(0, now() - t0);
+
+  session.duration = (session.duration || 0) + elapsed;
+  session.endTime = Date.now();
+  session.status = 'done';
+  delete session._t0;
+
+  if (finish) {
+    const task = getTask(session.taskId);
+    if (task) {
+      task.status = 'done';
+      task.doneTime = Date.now();
+    }
+    activeTaskId = null;
+  } else {
+    activeTaskId = session.taskId;
+  }
+  collapsedTimer = false;
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+}
+function stopTimer() {
+  const session = runningSession();
+  if (!session) return;
+  const task = getTask(session.taskId);
+  const name = task ? task.name : '这项作业';
+  if (!confirm(`「${name}」完成了吗？\n（确定后会记为已完成作业；如果只是暂时休息请点「暂停计时」）`)) return;
+  endSession(true);
+  renderAll();
+}
+
+// ==================== 作业清单操作 ====================
+function addTask() {
+  const nameEl = document.getElementById('taskName');
+  const noteEl = document.getElementById('taskNote');
+  const subject = document.getElementById('taskSubject').value;
+  const name = nameEl.value.trim();
+
+  if (!name) { alert('请输入作业名称'); nameEl.focus(); return; }
+
+  tasks.push({
+    id: uid(),
+    name,
+    subject,
+    vacation: currentVacation,
+    note: noteEl.value.trim(),
+    status: 'pending',
+    createdAt: Date.now(),
+    doneTime: null
+  });
+  save(K_TASKS, tasks);
+  nameEl.value = '';
+  noteEl.value = '';
+  nameEl.focus();
+  renderAll();
+}
+function markDone(taskId) {
+  const task = getTask(taskId);
+  if (!task || task.status === 'done') return;
+
+  const running = runningSession();
+  if (running && running.taskId === taskId) {
+    // 正在给这一项计时 → 直接结束并记为完成
+    endSession(true);
+  } else {
+    // 别的作业还在计时：只勾选这一项，绝不动正在跑的计时
+    task.status = 'done';
+    task.doneTime = Date.now();
+    if (activeTaskId === taskId) activeTaskId = null;
+    save(K_TASKS, tasks);
+    if (running) {
+      const runningName = (getTask(running.taskId) || {}).name || '另一项作业';
+      toast(`「${task.name}」已标记完成，计时器继续给「${runningName}」计时`);
+    }
+  }
+  renderAll();
+}
+function undoDone(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  task.status = 'pending';
+  task.doneTime = null;
+  save(K_TASKS, tasks);
+  renderAll();
+}
+function deleteTask(taskId) {
+  const task = getTask(taskId);
+  if (!task) return;
+  const running = runningSession();
+  if (running && running.taskId === taskId) {
+    alert('这项作业正在计时，请先结束计时再删除');
+    return;
+  }
+  if (!confirm(`删除作业「${task.name}」？相关的计时记录也会删除。`)) return;
+  tasks = tasks.filter(t => t.id !== taskId);
+  sessions = sessions.filter(s => s.taskId !== taskId);
+  if (activeTaskId === taskId) activeTaskId = null;
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+  renderAll();
+}
+function clearDone() {
+  const doneTasks = tasks.filter(t => t.status === 'done');
+  if (doneTasks.length === 0) { alert('还没有已完成的作业'); return; }
+  if (!confirm(`清空 ${doneTasks.length} 项已完成作业？清空后清单里不再显示它们（历史计时记录会保留）。`)) return;
+  const ids = doneTasks.map(t => t.id);
+  // 从清单移除：标记为 archived，历史记录仍可查
+  tasks = tasks.map(t => ids.includes(t.id) ? Object.assign({}, t, { status: 'archived' }) : t);
+  save(K_TASKS, tasks);
+  renderAll();
+}
+
+// ==================== 渲染 ====================
+function renderAll() {
+  renderVacationSelect();
+  renderTimer();
+  renderStats();
+  renderPending();
+  renderDone();
+  renderHistory();
+}
+
+function renderVacationSelect() {
+  const sel = document.getElementById('vacationSelect');
+  sel.innerHTML = vacations
+    .map(v => `<option value="${escapeHtml(v)}"${v === currentVacation ? ' selected' : ''}>${escapeHtml(v)}</option>`)
+    .join('');
+  const fv = document.getElementById('filterVacation');
+  fv.innerHTML = '<option value="">全部假期</option>' +
+    vacations.map(v => `<option value="${escapeHtml(v)}"${v === filterVacation ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+}
+
+function renderTimer() {
+  const card = document.getElementById('timerCard');
+  const task = activeTask();
+  const session = runningSession();
+
+  if (!task && !session) { card.style.display = 'none'; stopTicking(); return; }
+  card.style.display = 'block';
+
+  const shown = task || getTask(session.taskId);
+  if (!shown) { card.style.display = 'none'; stopTicking(); return; }
+
+  document.getElementById('timerName').textContent = shown.name;
+
+  const accumulated = taskAccumulated(shown.id);
+  const isRunning = !!session && session.taskId === shown.id;
+  document.getElementById('timerMeta').innerHTML =
+    `<span class="badge">${escapeHtml(shown.subject)}</span>` +
+    `<span class="badge vacation">${escapeHtml(shown.vacation)}</span>` +
+    (isRunning ? '<span class="badge doing">计时中</span>' : '<span class="badge" style="background:#f2f3f5;color:#888">未在计时</span>') +
+    `已累计 ${formatDuration(accumulated)}`;
+
+  document.getElementById('timerBtn').textContent = isRunning ? '重新开始（先结束当前段）' : '开始计时';
+  document.getElementById('timerBtn').disabled = isRunning;
+  document.getElementById('pauseBtn').style.display = isRunning ? '' : 'none';
+
+  const timeEl = document.getElementById('timerTime');
+  const body = card;
+
+  if (collapsedTimer) {
+    timeEl.textContent = formatDuration(accumulated);
+    timeEl.style.fontSize = '24px';
+  } else {
+    timeEl.style.fontSize = '';
+    if (isRunning) {
+      const t0 = session._t0 != null ? session._t0 : now();
+      const base = accumulated;
+      const tick = () => { timeEl.textContent = formatTimer(base + (now() - t0)); };
+      tick();
+      startTicking(tick);
+    } else {
+      timeEl.textContent = formatTimer(accumulated);
+      stopTicking();
+    }
+  }
+  if (!isRunning) stopTicking();
+}
+function startTicking(fn) {
+  stopTicking();
+  tickTimer = setInterval(fn, 1000);
+}
+function stopTicking() {
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+
+function renderStats() {
+  const scope = tasks.filter(t => t.vacation === currentVacation && t.status !== 'archived');
+  const doneTasks = scope.filter(t => t.status === 'done');
+  const pendingTasks = scope.filter(t => t.status === 'pending');
+
+  const allMs = sessions
+    .filter(s => s.status === 'done' && s.vacation === currentVacation)
+    .reduce((sum, s) => sum + (s.duration || 0), 0);
+  const todayMs = sessions
+    .filter(s => s.status === 'done' && s.vacation === currentVacation && isToday(s.endTime))
+    .reduce((sum, s) => sum + (s.duration || 0), 0);
+
+  document.getElementById('statsTitle').innerHTML =
+    `作业进度 <span class="hint">${escapeHtml(currentVacation)}</span>`;
+  document.getElementById('statCount').textContent = doneTasks.length;
+  document.getElementById('statPending').textContent = pendingTasks.length;
+  document.getElementById('statTotal').textContent = formatDuration(allMs);
+  document.getElementById('statToday').textContent = formatDuration(todayMs);
+
+  const total = doneTasks.length + pendingTasks.length;
+  const pct = total === 0 ? 0 : Math.round(doneTasks.length / total * 100);
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressText').textContent =
+    total === 0 ? '还没有作业，先添加吧' : `已完成 ${doneTasks.length} / ${total} 项（${pct}%）`;
+
+  // 各科目未完成统计
+  document.getElementById('subjectStats').innerHTML = SUBJECTS.map(sub => {
+    const p = pendingTasks.filter(t => t.subject === sub).length;
+    const d = doneTasks.filter(t => t.subject === sub).length;
+    if (p + d === 0) return '';
+    return `<span class="chip">${sub} 未完成 <b>${p}</b> / 共 ${p + d}</span>`;
+  }).join('') || '';
+}
+
+function taskRowHtml(t, opts) {
+  const accumulated = taskAccumulated(t.id);
+  const running = runningSession();
+  const isRunning = !!running && running.taskId === t.id;
+  const note = t.note ? `· ${escapeHtml(t.note)}` : '';
+  const doneMeta = t.status === 'done' ? `完成于 ${formatTime(t.doneTime || t.createdAt)}` : '';
+
+  if (opts && opts.done) {
+    return `
+      <div class="task">
+        <div class="check checked" title="取消完成" data-action="undo" data-id="${t.id}">✓</div>
+        <div class="task-body">
+          <div class="task-main">
+            <div class="task-name" style="color:#999;text-decoration:line-through;">${escapeHtml(t.name)}</div>
+            <div class="task-meta">
+              <span class="badge">${escapeHtml(t.subject)}</span>
+              <span class="badge vacation">${escapeHtml(t.vacation)}</span>
+              ${doneMeta} ${note}
+            </div>
+          </div>
+          <div class="task-time">${formatDuration(accumulated)}</div>
+          <div class="task-actions">
+            <button class="ghost mini" data-action="delete" data-id="${t.id}">删除</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="task">
+      <div class="check" title="标记完成" data-action="done" data-id="${t.id}">✓</div>
+      <div class="task-body">
+        <div class="task-main">
+          <div class="task-name">${escapeHtml(t.name)}</div>
+          <div class="task-meta">
+            <span class="badge">${escapeHtml(t.subject)}</span>
+            ${isRunning ? '<span class="badge doing">计时中</span>' : ''}
+            ${accumulated > 0 ? `已用时 ${formatDuration(accumulated)}` : '还没开始'}
+            ${note}
+          </div>
+        </div>
+        <div class="task-actions">
+          <button class="mini" data-action="start" data-id="${t.id}" ${isRunning ? 'disabled' : ''}>开始计时</button>
+          <button class="ghost mini" data-action="delete" data-id="${t.id}">删除</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderPending() {
+  const el = document.getElementById('pendingList');
+  const list = tasks.filter(t => t.vacation === currentVacation && t.status !== 'done' && t.status !== 'archived');
+  document.getElementById('pendingTitle').innerHTML =
+    `未完成作业清单 <span class="hint">${escapeHtml(currentVacation)} · 共 ${list.length} 项</span>`;
+
+  if (list.length === 0) {
+    el.innerHTML = '<div class="empty">🎉 这个假期的作业都完成啦！<br>（新作业可以在上面添加）</div>';
+    return;
+  }
+  // 按科目分组
+  el.innerHTML = SUBJECTS.map(sub => {
+    const group = list.filter(t => t.subject === sub);
+    if (group.length === 0) return '';
+    return `<div class="group-title">${sub} <span class="count">${group.length} 项</span></div>` +
+      group.map(t => taskRowHtml(t, { done: false })).join('');
+  }).join('') + (() => {
+    const others = list.filter(t => !SUBJECTS.includes(t.subject));
+    if (others.length === 0) return '';
+    return `<div class="group-title">其他 <span class="count">${others.length} 项</span></div>` +
+      others.map(t => taskRowHtml(t, { done: false })).join('');
+  })();
+}
+
+function renderDone() {
+  const el = document.getElementById('doneList');
+  const list = tasks
+    .filter(t => t.vacation === currentVacation && t.status === 'done')
+    .sort((a, b) => (b.doneTime || 0) - (a.doneTime || 0));
+  document.getElementById('doneTitle').innerHTML =
+    `已完成作业 <span class="hint">${list.length} 项</span>`;
+
+  if (list.length === 0) {
+    el.innerHTML = '<div class="empty">还没有完成的作业</div>';
+    return;
+  }
+  el.innerHTML = list.map(t => taskRowHtml(t, { done: true })).join('');
+}
+
+function renderHistory() {
+  const subjSel = document.getElementById('filterSubject');
+  subjSel.innerHTML = '<option value="">全部科目</option>' +
+    SUBJECTS.map(s => `<option value="${s}"${s === filterSubject ? ' selected' : ''}>${s}</option>`).join('');
+
+  const listEl = document.getElementById('recordList');
+  let list = sessions.filter(s => s.status === 'done');
+  if (filterVacation) list = list.filter(s => s.vacation === filterVacation);
+  if (filterSubject) list = list.filter(s => s.subject === filterSubject);
+
+  if (list.length === 0) {
+    listEl.innerHTML = '<div class="empty">还没有计时记录</div>';
+    return;
+  }
+  listEl.innerHTML = list.map(s => `
+    <div class="record">
+      <div class="record-info">
+        <div class="record-name">${escapeHtml(s.taskName)}</div>
+        <div class="record-meta">
+          <span class="badge">${escapeHtml(s.subject)}</span>
+          <span class="badge vacation">${escapeHtml(s.vacation)}</span>
+          ${formatTime(s.startTime)} - ${s.endTime ? formatTime(s.endTime) : '--'}
+        </div>
+      </div>
+      <div class="record-time">${formatDuration(s.duration)}</div>
+      <button class="ghost mini" data-action="delrec" data-id="${s.id}">删除</button>
+    </div>
+  `).join('');
+}
+
+// ==================== 导出 ====================
+function exportData() {
+  const data = JSON.stringify({
+    exportedAt: new Date().toISOString(),
+    vacations,
+    currentVacation,
+    tasks,
+    records: sessions
+  }, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `作业记录_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ==================== 事件绑定 ====================
+function bind() {
+  // 科目下拉
+  document.getElementById('taskSubject').innerHTML =
+    SUBJECTS.map(s => `<option value="${s}">${s}</option>`).join('');
+
+  document.getElementById('vacationSelect').onchange = e => setVacation(e.target.value);
+  document.getElementById('newVacationBtn').onclick = addVacation;
+  document.getElementById('delVacationBtn').onclick = deleteVacation;
+
+  document.getElementById('timerBtn').onclick = () => {
+    const t = activeTask();
+    if (t) startTimer(t.id);
+  };
+  document.getElementById('pauseBtn').onclick = pauseTimer;
+  document.getElementById('timerCloseBtn').onclick = () => {
+    collapsedTimer = true;
+    renderTimer();
+  };
+
+  document.getElementById('addBtn').onclick = addTask;
+  document.getElementById('taskName').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTask();
+  });
+  document.getElementById('taskNote').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addTask();
+  });
+
+  document.getElementById('clearDoneBtn').onclick = clearDone;
+  document.getElementById('exportBtn').onclick = exportData;
+
+  document.getElementById('filterVacation').onchange = e => { filterVacation = e.target.value; renderHistory(); };
+  document.getElementById('filterSubject').onchange = e => { filterSubject = e.target.value; renderHistory(); };
+
+  // 清单 / 历史 事件委托
+  document.getElementById('pendingList').addEventListener('click', onListClick);
+  document.getElementById('doneList').addEventListener('click', onListClick);
+  document.getElementById('recordList').addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    if (btn.dataset.action === 'delrec') {
+      if (!confirm('删除这条计时记录？')) return;
+      sessions = sessions.filter(s => s.id !== btn.dataset.id);
+      save(K_RECS, sessions);
+      renderAll();
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    if (runningSession()) save(K_RECS, sessions);
+  });
+
+  // 若上次关闭页面时正在计时，自动续上
+  const running = runningSession();
+  if (running) {
+    running._t0 = now();
+    activeTaskId = running.taskId;
+  }
+}
+function onListClick(e) {
+  const el = e.target.closest('[data-action]');
+  if (!el) return;
+  const id = el.dataset.id;
+  const action = el.dataset.action;
+  if (action === 'start') startTimer(id);
+  else if (action === 'done') markDone(id);
+  else if (action === 'undo') undoDone(id);
+  else if (action === 'delete') deleteTask(id);
+}
+
+// ==================== 初始化 ====================
+function init() {
+  bind();
+  renderAll();
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+</script>
+</body>
+</html>
