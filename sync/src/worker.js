@@ -270,6 +270,59 @@ async function handlePush(request, env, auth) {
   return json({ ok: true, updatedAt: now });
 }
 
+/**
+ * POST /api/reset-credentials —— 用 SETUP_TOKEN 重发一套凭据
+ *
+ * 用途：首次初始化成功但响应没收到（网络中断），或口令/备用码全丢了。
+ * 因为 SETUP_TOKEN 也是你自己保管的机密，所以这不会变成后门。
+ * 副作用：旧的备用码全部作废、所有设备令牌吊销（需要重新登录）。
+ */
+async function handleResetCredentials(request, env) {
+  if (!env.SETUP_TOKEN) return json({ ok: false, error: 'setup_disabled' }, 403);
+
+  const body = await readBody(request);
+  if (body === null) return json({ ok: false, error: 'bad_json' }, 400);
+  if (!timingSafeEqual(String(body.setupToken || ''), String(env.SETUP_TOKEN))) {
+    return json({ ok: false, error: 'bad_setup_token' }, 403);
+  }
+
+  const user = await env.DB.prepare('SELECT * FROM users ORDER BY created_at LIMIT 1').first();
+  if (!user) return json({ ok: false, error: 'not_initialized' }, 409);
+
+  const password = makePassword();
+  const salt = randomHex(16);
+  const pwdHash = await pbkdf2Hex(password, salt, PBKDF2_ITERATIONS);
+  const now = Date.now();
+
+  await env.DB.prepare('UPDATE users SET pwd_salt = ?, pwd_hash = ?, pwd_iter = ? WHERE id = ?')
+    .bind(salt, pwdHash, PBKDF2_ITERATIONS, user.id).run();
+
+  // 旧备用码全部作废，重新发 10 个
+  await env.DB.prepare('DELETE FROM backup_codes WHERE user_id = ?').bind(user.id).run();
+  const codes = [];
+  const stmts = [];
+  for (let i = 0; i < 10; i++) {
+    const code = makeBackupCode();
+    codes.push(code);
+    stmts.push(
+      env.DB.prepare('INSERT INTO backup_codes (code_hash, user_id, created_at) VALUES (?,?,?)')
+        .bind(await sha256Hex(normalizeCode(code)), user.id, now)
+    );
+  }
+  await env.DB.batch(stmts);
+
+  // 所有旧设备令牌失效
+  await env.DB.prepare('UPDATE devices SET revoked = 1 WHERE user_id = ?').bind(user.id).run();
+
+  return json({
+    ok: true,
+    username: user.username,
+    password,
+    backupCodes: codes,
+    warning: '旧口令、旧备用码与所有设备登录均已失效，请保存新的'
+  });
+}
+
 // ------------------------------------------------------------
 // 入口
 // ------------------------------------------------------------
@@ -300,6 +353,9 @@ export default {
       }
       if (path === '/api/login' && request.method === 'POST') {
         return withCors(await handleLogin(request, env));
+      }
+      if (path === '/api/reset-credentials' && request.method === 'POST') {
+        return withCors(await handleResetCredentials(request, env));
       }
 
       // ---- 以下均需设备令牌 ----

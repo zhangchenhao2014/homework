@@ -1,6 +1,7 @@
 # 依赖与本地缓存
 node_modules/
 .wrangler/
+.worker-url
 *.log
 
 # 机密文件：绝不能提交

@@ -51,7 +51,7 @@ function wrangler(args, opts = {}) {
   };
 }
 
-const TOTAL = 8;
+const TOTAL = 9;
 
 // ------------------------------------------------------------
 // 1. 检查登录状态
@@ -164,34 +164,145 @@ let workerUrl = '';
     process.exit(1);
   }
   workerUrl = m[0].replace(/\/+$/, '');
+  // 记下来，重跑时即使部署输出解析失败也能知道地址（该文件已在 .gitignore 中）
+  try { fs.writeFileSync(path.join(here, '.worker-url'), workerUrl + '\n', 'utf8'); } catch (e) {}
   console.log(c.g('✓ 服务地址：') + c.b(workerUrl));
 }
 
 // ------------------------------------------------------------
-// 6. 创建账号
+// 5.5 连通性预检：workers.dev 子域名在国内常被 DNS 污染
 // ------------------------------------------------------------
-step(6, TOTAL, '创建账号');
-let creds = null;
+step(6, TOTAL, '检查服务地址连通性');
 {
-  const res = await fetch(workerUrl + '/api/bootstrap', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ setupToken, username: 'owner' })
-  });
-  const body = await res.json().catch(() => ({}));
-  if (!res.ok || !body.ok) {
-    console.log(c.r(`✗ 创建账号失败（HTTP ${res.status}）：`) + JSON.stringify(body));
-    console.log(c.y('  若是 already_initialized，说明之前已初始化过，可直接登录。'));
-    process.exit(1);
+  let host = '';
+  try { host = new URL(workerUrl).hostname; } catch (e) {}
+
+  // 1) DNS 解析（Node 内置，会分别列出各地址）
+  let addrs = [];
+  try {
+    const r = await import('dns');
+    addrs = await r.promises.lookup(host, { all: true });
+  } catch (e) {
+    addrs = [];
   }
-  creds = body;
-  console.log(c.g('✓ 账号已创建，备用码 ' + creds.backupCodes.length + ' 个'));
+  console.log(c.d(`  DNS ${host} -> ${addrs.map(a => a.address).join(', ') || '解析失败'}`));
+
+  // 2) 真实请求（带重试）
+  let reachable = false;
+  let lastErr = '';
+  for (let i = 1; i <= 3 && !reachable; i++) {
+    try {
+      const ctl = AbortSignal.timeout(12000);
+      const res = await fetch(workerUrl + '/api/health', { signal: ctl });
+      if (res.ok) { reachable = true; console.log(c.g('  ✓ 服务可访问（HTTP ' + res.status + '）')); break; }
+      lastErr = 'HTTP ' + res.status;
+    } catch (e) {
+      lastErr = (e && (e.cause?.code || e.message)) || String(e);
+      console.log(c.y(`  第 ${i} 次连接失败：${lastErr}`));
+    }
+  }
+
+  if (!reachable) {
+    console.log(c.r('\n✗ 连不上你的 Worker：' + lastErr));
+    console.log(`
+${c.b('这说明本机（很可能也包括你手机）的 DNS 把 *.workers.dev 解析到了无效地址。')}
+
+${c.b('先手动确认一下能不能打开：')}
+  在浏览器访问  ${workerUrl}/api/health
+  正常应看到  {"ok":true,...}
+
+${c.b('如果浏览器也打不开，有三个办法（任选其一）：')}
+  1) 换用能正常解析的 DNS（例如路由器/系统 DNS 改成 223.5.5.5 或 119.29.29.29）后重跑
+  2) 在 hosts 文件里为你的子域名指定一个可用的 Cloudflare IP（需要管理员权限）
+  3) 告诉我，我把后端换成不依赖 workers.dev 的方案
+
+${c.b('配置已全部就绪')}（数据库、机密、部署都完成了），修好网络后${c.b('重跑 npm run setup 即可')}，
+前面步骤会自动跳过，直接创建账号。
+`);
+    process.exit(3);
+  }
 }
 
 // ------------------------------------------------------------
-// 7. 写入凭据文件
+// 7. 创建账号
 // ------------------------------------------------------------
-step(7, TOTAL, '保存凭据到桌面');
+step(7, TOTAL, '创建账号');
+let creds = null;
+{
+  let res = null, body = {}, lastErr = '';
+  for (let i = 1; i <= 3; i++) {
+    try {
+      res = await fetch(workerUrl + '/api/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ setupToken, username: 'owner' }),
+        signal: AbortSignal.timeout(20000)
+      });
+      body = await res.json().catch(() => ({}));
+      break;
+    } catch (e) {
+      lastErr = (e && (e.cause?.code || e.message)) || String(e);
+      console.log(c.y(`  第 ${i} 次请求失败：${lastErr}`));
+      res = null;
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  if (!res) {
+    console.log(c.r('\n✗ 创建账号时无法连接服务：' + lastErr));
+    console.log(`
+${c.b('配置本身没问题')}（数据库、机密、部署都已完成），只是这一步没连上。
+
+${c.b('网络恢复后重跑 npm run setup 即可')}，前面会全部自动跳过。
+也可以手动执行这一步：
+
+${c.d(`  Invoke-RestMethod -Method Post -Uri "${workerUrl}/api/bootstrap" \``)}
+${c.d(`    -ContentType "application/json" \``)}
+${c.d(`    -Body '{"setupToken":"<你的 SETUP_TOKEN>","username":"owner"}'`)}
+${c.d('  # SETUP_TOKEN 是随机生成的，重跑 setup 时会在第 4 步重新设置一个，所以直接重跑更省事')}
+`);
+    process.exit(3);
+  }
+
+  if (!res.ok || !body.ok) {
+    // 账号已存在：多半是上一次初始化成功了但响应没收到（网络中断）。
+    // 只要 SETUP_TOKEN 还在，就能重发一套新凭据，不会被锁在门外。
+    if (body.error === 'already_initialized') {
+      console.log(c.y('\n账号已存在 —— 通常是上次初始化成功了但响应没收到。'));
+      console.log(c.y('将为你重发一套新凭据（旧口令与旧备用码会作废，所有设备需重新登录）。'));
+      try {
+        const reset = await fetch(workerUrl + '/api/reset-credentials', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ setupToken }),
+          signal: AbortSignal.timeout(20000)
+        });
+        const rb = await reset.json().catch(() => ({}));
+        if (!reset.ok || !rb.ok) {
+          console.log(c.r('✗ 重发失败：') + JSON.stringify(rb));
+          console.log(c.y('  若提示 404，说明线上还是旧版本代码，先执行：npx wrangler deploy'));
+          process.exit(1);
+        }
+        creds = rb;
+        console.log(c.g('✓ 已重发新凭据，备用码 ' + rb.backupCodes.length + ' 个'));
+      } catch (e) {
+        console.log(c.r('✗ 重发请求失败：' + ((e && (e.cause?.code || e.message)) || e)));
+        process.exit(3);
+      }
+    } else {
+      console.log(c.r(`✗ 创建账号失败（HTTP ${res.status}）：`) + JSON.stringify(body));
+      process.exit(1);
+    }
+  } else {
+    creds = body;
+    console.log(c.g('✓ 账号已创建，备用码 ' + creds.backupCodes.length + ' 个'));
+  }
+}
+
+// ------------------------------------------------------------
+// 8. 写入凭据文件
+// ------------------------------------------------------------
+step(8, TOTAL, '保存凭据到桌面');
 const credPath = path.join(os.homedir(), 'Desktop', '作业同步凭据.txt');
 {
   const content = [
@@ -218,7 +329,7 @@ const credPath = path.join(os.homedir(), 'Desktop', '作业同步凭据.txt');
 // ------------------------------------------------------------
 // 8. 完成
 // ------------------------------------------------------------
-step(8, TOTAL, '完成');
+step(9, TOTAL, '完成');
 console.log(`
 ${c.b('接下来：')}
   1. 打开 ${c.b(credPath)}，把口令和备用码存进密码管理器，然后删掉这个文件

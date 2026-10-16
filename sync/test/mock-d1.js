@@ -32,6 +32,16 @@ export function makeMockD1() {
       const row = sorted[0] || null;
       return { first: row, all: row ? [row] : [] };
     }
+    if (/^UPDATE users SET pwd_salt = \?, pwd_hash = \?, pwd_iter = \? WHERE id = \?$/i.test(s)) {
+      const [pwd_salt, pwd_hash, pwd_iter, id] = args;
+      const u = users.get(id);
+      if (u) Object.assign(u, { pwd_salt, pwd_hash, pwd_iter });
+      return { first: null, all: [] };
+    }
+    if (/^DELETE FROM backup_codes WHERE user_id = \?$/i.test(s)) {
+      for (const [k, c] of [...codes.entries()]) if (c.user_id === args[0]) codes.delete(k);
+      return { first: null, all: [] };
+    }
 
     // ---- devices ----
     if (/^SELECT token_hash, user_id, revoked FROM devices WHERE token_hash = \?$/i.test(s)) {

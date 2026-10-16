@@ -6,7 +6,7 @@
 
 import { mergeStates, pushWithRetry, pull, login, health } from '../src/sync-client.js';
 
-const API = 'http://127.0.0.1:8787';
+const API = process.env.E2E_API || 'http://127.0.0.1:8787';
 const SETUP_TOKEN = 'e2e-local-setup-token';
 
 let pass = 0, fail = 0;
@@ -231,6 +231,48 @@ section('9. 真实数据边界与安全');
   });
   const evilAllow = evil.headers.get('Access-Control-Allow-Origin');
   check('陌生来源不被放行', evilAllow !== 'https://evil.example.com', evilAllow);
+}
+
+// ------------------------------------------------------------
+section('10. 真实凭据重发（还原首次初始化响应丢失的场景）');
+{
+  const before = await login(API, password, 'password', '重发前');
+  check('重发前令牌可用', (await pull(API, before.token)).data !== null);
+
+  const bad = await fetch(API + '/api/reset-credentials', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setupToken: 'wrong-token' })
+  });
+  check('错误 SETUP_TOKEN 被拒（403）', bad.status === 403, bad.status);
+
+  const res = await fetch(API + '/api/reset-credentials', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setupToken: SETUP_TOKEN })
+  });
+  const body = await res.json();
+  check('重发成功', res.status === 200 && body.ok === true, body);
+  check('返回新口令与 10 个新备用码',
+    typeof body.password === 'string' && body.password.length >= 16 && body.backupCodes.length === 10,
+    [body.password?.length, body.backupCodes?.length]);
+  check('新口令与旧口令不同', body.password !== password, '口令未变！');
+
+  let threwOld = null;
+  try { await login(API, password, 'password'); } catch (e) { threwOld = e; }
+  check('旧口令失效（401）', threwOld && threwOld.status === 401, threwOld && threwOld.status);
+
+  const fresh = await login(API, body.password, 'password', '重发后');
+  check('新口令可登录', !!fresh.token, !!fresh.token);
+  check('新备用码可用', !!(await login(API, body.backupCodes[0], 'backup')).token);
+
+  let threwCode = null;
+  try { await login(API, codes[5], 'backup'); } catch (e) { threwCode = e; }
+  check('旧备用码作废（401）', threwCode && threwCode.status === 401, threwCode && threwCode.status);
+
+  let threwToken = null;
+  try { await pull(API, before.token); } catch (e) { threwToken = e; }
+  check('重发后旧设备令牌被吊销（401）', threwToken && threwToken.status === 401, threwToken && threwToken.status);
+
+  check('新令牌可用', (await pull(API, fresh.token)).data !== null);
 }
 
 // ------------------------------------------------------------

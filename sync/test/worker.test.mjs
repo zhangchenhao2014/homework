@@ -222,6 +222,52 @@ section('8. 吊销令牌');
 }
 
 // ------------------------------------------------------------
+section('9. 凭据重发（首次初始化响应丢失时的补救）');
+{
+  // 先拿一个可用令牌，稍后验证重发会让它失效
+  const before = await call(env, 'POST', '/api/login', { body: { secret: password, kind: 'password' } });
+  const oldToken = before.json.token;
+  check('重发前令牌可用', (await call(env, 'GET', '/api/sync', { token: oldToken })).status === 200);
+
+  let r = await call(env, 'POST', '/api/reset-credentials', { body: { setupToken: 'wrong' } });
+  check('错误 SETUP_TOKEN 被拒绝', r.status === 403 && r.json.error === 'bad_setup_token', r);
+
+  r = await call(env, 'POST', '/api/reset-credentials', { body: { setupToken: SETUP_TOKEN } });
+  check('正确 SETUP_TOKEN 重发成功', r.status === 200 && r.json.ok === true, r);
+  check('返回新口令', typeof r.json.password === 'string' && r.json.password.length >= 16, r.json.password?.length);
+  check('返回 10 个新备用码', Array.isArray(r.json.backupCodes) && r.json.backupCodes.length === 10, r.json.backupCodes?.length);
+  const newPassword = r.json.password;
+  const newCodes = r.json.backupCodes;
+
+  check('新口令与旧口令不同', newPassword !== password, '口令未变化！');
+
+  r = await call(env, 'POST', '/api/login', { body: { secret: password, kind: 'password' } });
+  check('旧口令失效', r.status === 401, r.status);
+
+  r = await call(env, 'POST', '/api/login', { body: { secret: newPassword, kind: 'password' } });
+  check('新口令可登录', r.status === 200, r.status);
+  const freshToken = r.json.token;
+
+  r = await call(env, 'POST', '/api/login', { body: { secret: newCodes[0], kind: 'backup' } });
+  check('新备用码可用', r.status === 200, r.status);
+
+  r = await call(env, 'POST', '/api/login', { body: { secret: codes[5], kind: 'backup' } });
+  check('旧备用码全部作废', r.status === 401, r.status);
+
+  r = await call(env, 'GET', '/api/sync', { token: oldToken });
+  check('重发后旧设备令牌被吊销', r.status === 401, r.status);
+
+  r = await call(env, 'GET', '/api/sync', { token: freshToken });
+  check('新登录的令牌可用', r.status === 200, r.status);
+
+  // 与旧口令同名的哈希不应再存明文；顺带确认库中仍无明文口令
+  const dump = env.DB._dump();
+  check('数据库中仍无明文口令', !JSON.stringify(dump).includes(newPassword), '明文泄露！');
+  check('数据库中仍无明文备用码', !dump.codes.some(c => JSON.stringify(c).includes(newCodes[0])), '明文泄露！');
+  check('用户表仍只有 1 条记录（未重复创建）', dump.users.length === 1, dump.users.length);
+}
+
+// ------------------------------------------------------------
 console.log('\n================ 结果 ================');
 console.log(`通过 ${pass} 项，失败 ${fail} 项`);
 process.exit(fail === 0 ? 0 : 1);

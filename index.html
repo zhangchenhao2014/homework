@@ -654,6 +654,45 @@ async function health(apiBase, fetchLike) {
   return res.json();
 }
 
+/** 创建账号（仅首次可用），返回 { password, backupCodes } */
+async function bootstrap(apiBase, setupToken, username, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const res = await doFetch(trimBase(apiBase) + '/api/bootstrap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setupToken, username: username || 'owner' })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+/**
+ * 用 SETUP_TOKEN 重发一套凭据（首次初始化响应丢失 / 凭据全丢时的补救）。
+ * 副作用：旧口令与旧备用码作废，所有设备需重新登录。
+ */
+async function resetCredentials(apiBase, setupToken, fetchLike) {
+  const doFetch = resolveFetch(fetchLike);
+  const res = await doFetch(trimBase(apiBase) + '/api/reset-credentials', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setupToken })
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    const err = new Error(body.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
 /** 本设备登出 / 全部设备登出 */
 async function logout(apiBase, token, allDevices, fetchLike) {
   const doFetch = resolveFetch(fetchLike);
