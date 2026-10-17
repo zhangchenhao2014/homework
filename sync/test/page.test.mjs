@@ -291,7 +291,8 @@ section('3. 登录（口令正确）→ 本机数据自动上传 + 本地改动�
     querySelector: (sel) => {
       const vals = {
         '#mErr': getEl('mErr'), '#mOk': getEl('mOk'), '#mKind': { value: 'password' },
-        '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: 'CORRECT-PASSWORD' }
+        '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: 'CORRECT-PASSWORD' },
+        '#mUser': { value: 'owner' }
       };
       return vals[sel] || getEl(sel.replace('#', ''));
     }
@@ -335,7 +336,8 @@ section('4. 第二台设备：登录后看到同一账号的数据');
   const modal = (secret) => ({
     querySelector: (sel) => ({
       '#mErr': getEl('mErr'), '#mOk': getEl('mOk'), '#mKind': { value: 'password' },
-      '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: secret }
+      '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: secret },
+      '#mUser': { value: 'owner' }
     }[sel] || getEl(sel.replace('#', '')))
   });
   await a.sandbox.doLogin(modal('CORRECT-PASSWORD'));
@@ -354,7 +356,8 @@ section('4. 第二台设备：登录后看到同一账号的数据');
   const modalB = {
     querySelector: (sel) => ({
       '#mErr': getEl('mErr'), '#mOk': getEl('mOk'), '#mKind': { value: 'password' },
-      '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: 'CORRECT-PASSWORD' }
+      '#mApi': { value: 'https://sync.test' }, '#mSecret': { value: 'CORRECT-PASSWORD' },
+        '#mUser': { value: 'owner' }
     }[sel] || getEl(sel.replace('#', '')))
   };
   await b.sandbox.doLogin(modalB);

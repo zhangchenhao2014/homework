@@ -143,7 +143,12 @@ async function handleBootstrap(request, env) {
 
 /**
  * POST /api/login —— 用口令或备用码换取设备令牌
- * body: { secret, kind: 'password'|'backup', label }
+ * body: { username, secret, kind: 'password'|'backup', label }
+ *
+ * 多账号说明：
+ *  - 口令登录：必须指明 username（除非库里只有一个账号，见下方兼容逻辑）
+ *  - 备用码登录：备用码本身就是凭据，能唯一定位到账号，所以不需要 username
+ *  - 账号不存在时也照常做一次 PBKDF2，避免用响应时间判断账号是否存在
  */
 async function handleLogin(request, env) {
   const body = await readBody(request);
@@ -152,29 +157,52 @@ async function handleLogin(request, env) {
   const secret = String(body.secret || '');
   const kind = body.kind === 'backup' ? 'backup' : 'password';
   const label = String(body.label || '').slice(0, 60);
+  const username = String(body.username || '').trim();
   if (!secret) return json({ ok: false, error: 'missing_secret' }, 400);
 
-  const user = await env.DB.prepare('SELECT * FROM users ORDER BY created_at LIMIT 1').first();
-  if (!user) return json({ ok: false, error: 'not_initialized' }, 409);
+  const totalRow = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
+  const userCount = totalRow ? Number(totalRow.n) : 0;
+  if (userCount === 0) return json({ ok: false, error: 'not_initialized' }, 409);
 
+  let user = null;
   let valid = false;
-  if (kind === 'password') {
-    const hash = await pbkdf2Hex(secret, user.pwd_salt, user.pwd_iter);
-    valid = timingSafeEqual(hash, user.pwd_hash);
-  } else {
+
+  if (kind === 'backup') {
+    // 备用码直接定位账号，用户不用记账号名
     const codeHash = await sha256Hex(normalizeCode(secret));
     const row = await env.DB.prepare(
-      'SELECT code_hash, used_at FROM backup_codes WHERE code_hash = ? AND user_id = ?'
-    ).bind(codeHash, user.id).first();
+      'SELECT code_hash, used_at, user_id FROM backup_codes WHERE code_hash = ?'
+    ).bind(codeHash).first();
     if (row && !row.used_at) {
-      await env.DB.prepare('UPDATE backup_codes SET used_at = ? WHERE code_hash = ?')
-        .bind(Date.now(), codeHash).run();
-      valid = true;
+      user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(row.user_id).first();
+      if (user) {
+        await env.DB.prepare('UPDATE backup_codes SET used_at = ? WHERE code_hash = ?')
+          .bind(Date.now(), codeHash).run();
+        valid = true;
+      }
+    }
+  } else {
+    if (username) {
+      user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(username).first();
+    } else if (userCount === 1) {
+      // 向后兼容：老客户端不带账号，而库里只有一个账号时，仍按该账号验证
+      user = await env.DB.prepare('SELECT * FROM users ORDER BY created_at LIMIT 1').first();
+    } else {
+      // 已有多个账号，必须指明是哪个
+      return json({ ok: false, error: 'need_username' }, 400);
+    }
+
+    if (user) {
+      const hash = await pbkdf2Hex(secret, user.pwd_salt, user.pwd_iter);
+      valid = timingSafeEqual(hash, user.pwd_hash);
+    } else {
+      // 账号不存在也做一次等价的 PBKDF2，避免通过响应时间探测账号存在性
+      await pbkdf2Hex(secret, '00'.repeat(16), PBKDF2_ITERATIONS);
     }
   }
 
   if (!valid) {
-    // 统一错误，不区分“口令错”和“备用码错”，避免信息泄露
+    // 统一错误，不区分“口令错”“账号不存在”“备用码错”，避免信息泄露
     return json({ ok: false, error: 'invalid_secret' }, 401);
   }
 
@@ -286,8 +314,17 @@ async function handleResetCredentials(request, env) {
     return json({ ok: false, error: 'bad_setup_token' }, 403);
   }
 
-  const user = await env.DB.prepare('SELECT * FROM users ORDER BY created_at LIMIT 1').first();
-  if (!user) return json({ ok: false, error: 'not_initialized' }, 409);
+  const resetName = String(body.username || '').trim();
+  let user = null;
+  if (resetName) {
+    user = await env.DB.prepare('SELECT * FROM users WHERE username = ?').bind(resetName).first();
+  } else {
+    // 只有单账号时才允许省略账号名，多账号下必须指明，避免误改别人
+    const cnt = await env.DB.prepare('SELECT COUNT(*) AS n FROM users').first();
+    if (cnt && Number(cnt.n) > 1) return json({ ok: false, error: 'need_username' }, 400);
+    user = await env.DB.prepare('SELECT * FROM users ORDER BY created_at LIMIT 1').first();
+  }
+  if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
 
   const password = makePassword();
   const salt = randomHex(16);

@@ -102,13 +102,13 @@ let tokenA, tokenB;
   });
   check('错误口令被拒（401）', badLogin.status === 401, badLogin.status);
 
-  const a = await login(API, password, 'password', '电脑');
+  const a = await login(API, password, 'password', '电脑', 'owner');
   tokenA = a.token;
   check('设备A 登录成功（真实 HTTP + 真实 SQL）', !!tokenA, a);
   check('剩余备用码数量合理（0~10）',
     a.backupCodesLeft >= 0 && a.backupCodesLeft <= 10, a.backupCodesLeft);
 
-  const b = await login(API, password, 'password', '手机');
+  const b = await login(API, password, 'password', '手机', 'owner');
   tokenB = b.token;
   check('设备B 登录成功', !!tokenB, !!tokenB);
   check('两台设备令牌不同', tokenA !== tokenB, 'token 相同！');
@@ -171,7 +171,7 @@ section('4. 设备A 上传 → 设备B 拉取到相同数据');
 section('7. 真实备用码登录（一次性）');
 {
   // 记录登录前的剩余数量，避免依赖「库是全新的」这个前提
-  const pre = await login(API, password, 'password', '统计用');
+  const pre = await login(API, password, 'password', '统计用', 'owner');
   const beforeLeft = pre.backupCodesLeft;
 
   const ok = await fetch(API + '/api/login', {
@@ -200,7 +200,7 @@ section('7. 真实备用码登录（一次性）');
 // ------------------------------------------------------------
 section('8. 令牌吊销（真实数据库状态变更）');
 {
-  const temp = await login(API, password, 'password', '临时设备');
+  const temp = await login(API, password, 'password', '临时设备', 'owner');
   check('临时设备可拉取数据', (await pull(API, temp.token)).data !== null);
 
   const out = await fetch(API + '/api/logout', {
@@ -222,14 +222,14 @@ section('8. 令牌吊销（真实数据库状态变更）');
   try { await pull(API, tokenB); } catch (e) { threw2 = e; }
   check('logout-all 后设备B 也失效', threw2 && threw2.status === 401, threw2 && threw2.status);
 
-  const relogin = await login(API, password, 'password', '重新登录');
+  const relogin = await login(API, password, 'password', '重新登录', 'owner');
   check('吊销后仍可用口令重新登录', !!relogin.token, !!relogin.token);
 }
 
 // ------------------------------------------------------------
 section('9. 真实数据边界与安全');
 {
-  const t = await login(API, password, 'password', '边界测试');
+  const t = await login(API, password, 'password', '边界测试', 'owner');
 
   const big = await fetch(API + '/api/sync', {
     method: 'PUT',
@@ -274,7 +274,7 @@ section('9. 真实数据边界与安全');
 // ------------------------------------------------------------
 section('10. 部署后 HTTP 凭据重发已关闭（改为离线流程）');
 {
-  const before = await login(API, password, 'password', '检查前');
+  const before = await login(API, password, 'password', '检查前', 'owner');
   check('口令仍可正常登录', !!before.token, !!before.token);
 
   const r = await fetch(API + '/api/reset-credentials', {
@@ -284,7 +284,7 @@ section('10. 部署后 HTTP 凭据重发已关闭（改为离线流程）');
   check('未配置 SETUP_TOKEN 时重发接口不可用（403）', r.status === 403, r.status);
 
   // 口令仍然有效（没有被意外改动）
-  const after = await login(API, password, 'password', '检查后');
+  const after = await login(API, password, 'password', '检查后', 'owner');
   check('口令未被改动', !!after.token, !!after.token);
   check('原令牌仍可用', (await pull(API, before.token)).data !== null);
 }

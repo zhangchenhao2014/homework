@@ -11,7 +11,7 @@
     "build": "node build-page.mjs",
     "bootstrap": "node bootstrap-db.mjs",
     "bootstrap:remote": "node bootstrap-db.mjs --remote",
-    "test": "node test/crypto.test.mjs && node test/platform-limits.test.mjs && node test/tombstone.test.mjs && node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
+    "test": "node test/crypto.test.mjs && node test/platform-limits.test.mjs && node test/tombstone.test.mjs && node test/admin.test.mjs && node test/multi-user.test.mjs && node test/worker.test.mjs && node test/sync.test.mjs && node test/page.test.mjs",
     "test:crypto": "node test/crypto.test.mjs",
     "test:limits": "node test/platform-limits.test.mjs",
     "test:worker": "node test/worker.test.mjs",
@@ -22,6 +22,9 @@
     "db:create": "wrangler d1 create homework-sync",
     "db:local": "wrangler d1 execute homework-sync --local --file=./schema.sql",
     "db:remote": "wrangler d1 execute homework-sync --remote --file=./schema.sql",
-    "test:tombstone": "node test/tombstone.test.mjs"
+    "test:tombstone": "node test/tombstone.test.mjs",
+    "test:admin": "node test/admin.test.mjs",
+    "test:multi": "node test/multi-user.test.mjs",
+    "admin": "node admin.mjs"
   }
 }

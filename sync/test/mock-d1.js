@@ -32,6 +32,14 @@ export function makeMockD1() {
       const row = sorted[0] || null;
       return { first: row, all: row ? [row] : [] };
     }
+    if (/^SELECT \* FROM users WHERE username = \?$/i.test(s)) {
+      const row = rowsOf(users).find(u => u.username === args[0]) || null;
+      return { first: row, all: row ? [row] : [] };
+    }
+    if (/^SELECT \* FROM users WHERE id = \?$/i.test(s)) {
+      const row = users.get(args[0]) || null;
+      return { first: row, all: row ? [row] : [] };
+    }
     if (/^UPDATE users SET pwd_salt = \?, pwd_hash = \?, pwd_iter = \? WHERE id = \?$/i.test(s)) {
       const [pwd_salt, pwd_hash, pwd_iter, id] = args;
       const u = users.get(id);
@@ -78,6 +86,11 @@ export function makeMockD1() {
       const row = codes.get(args[0]);
       const ok = row && row.user_id === args[1] ? row : null;
       return { first: ok, all: ok ? [ok] : [] };
+    }
+    // 多账号后：备用码本身即可定位账号，不再需要 username
+    if (/^SELECT code_hash, used_at, user_id FROM backup_codes WHERE code_hash = \?$/i.test(s)) {
+      const row = codes.get(args[0]) || null;
+      return { first: row, all: row ? [row] : [] };
     }
     if (/^UPDATE backup_codes SET used_at = \? WHERE code_hash = \?$/i.test(s)) {
       const c = codes.get(args[1]);
@@ -135,6 +148,28 @@ export function makeMockD1() {
         users: rowsOf(users), devices: rowsOf(devices),
         codes: rowsOf(codes), sync: rowsOf(sync)
       };
+    },
+    /**
+     * 测试辅助：直接种一个账号（模拟 admin.mjs 建号后的数据库状态）。
+     * 用与 api.js 相同的 PBKDF2 参数，所以能真实走登录校验。
+     * @returns {Promise<{id, username, password, codes}>}
+     */
+    async _seedUser({ username, password, iterations = 100000, codeCount = 10 }) {
+      const { pbkdf2Hex, sha256Hex, randomHex, makeBackupCode, normalizeCode } = await import('../src/crypto.js');
+      const id = randomHex(16);
+      const salt = randomHex(16);
+      const hash = await pbkdf2Hex(password, salt, iterations);
+      const now = Date.now();
+      users.set(id, { id, username, pwd_salt: salt, pwd_hash: hash, pwd_iter: iterations, created_at: now });
+
+      const codeList = [];
+      for (let i = 0; i < codeCount; i++) {
+        const code = makeBackupCode();
+        codeList.push(code);
+        const h = await sha256Hex(normalizeCode(code));
+        codes.set(h, { code_hash: h, user_id: id, created_at: now, used_at: null });
+      }
+      return { id, username, password, codes: codeList };
     }
   };
 }

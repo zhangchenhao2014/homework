@@ -4,6 +4,7 @@ node_modules/
 .worker-url
 .site-url
 .bootstrap.sql
+.admin-*.sql
 *.log
 
 # 机密文件：绝不能提交

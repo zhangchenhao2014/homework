@@ -672,13 +672,21 @@ async function pull(apiBase, token, fetchLike) {
   return { data: body.data, updatedAt: Number(body.updatedAt || 0) };
 }
 
-/** 登录：用口令或备用码换取设备令牌 */
-async function login(apiBase, secret, kind, label, fetchLike) {
+/**
+ * 登录：用口令或备用码换取设备令牌
+ * @param {string} username 账号名（口令登录必填；备用码登录可省略，码本身能定位账号）
+ */
+async function login(apiBase, secret, kind, label, username, fetchLike) {
   const doFetch = resolveFetch(fetchLike);
   const res = await doFetch(trimBase(apiBase) + '/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ secret, kind: kind || 'password', label: label || '' })
+    body: JSON.stringify({
+      secret,
+      kind: kind || 'password',
+      label: label || '',
+      username: username || ''
+    })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ok) {
@@ -766,6 +774,8 @@ const K_API   = 'hw_api_base';
 const K_TOKEN = 'hw_device_token';
 const K_UPD   = 'hw_remote_updated_at';
 const K_DEL   = 'hw_deleted_tasks';   // 删除标记（tombstone）：id -> 删除时刻
+const K_USER  = 'hw_last_username';   // 上次登录的账号名，用于预填
+const K_OWNER = 'hw_local_owner';     // 本机这份作业数据属于哪个账号
 
 // ==================== 存储层 ====================
 function load(key, fallback) {
@@ -1587,9 +1597,14 @@ function showLoginModal(opts) {
 
     <label class="field">验证方式</label>
     <select id="mKind">
-      <option value="password">登录口令</option>
-      <option value="backup">一次性备用码</option>
+      <option value="password">账号 + 口令</option>
+      <option value="backup">一次性备用码（免账号）</option>
     </select>
+
+    <div id="mUserWrap">
+      <label class="field" id="mUserLabel">账号</label>
+      <input id="mUser" placeholder="你的账号，如 zhangsan" autocomplete="username">
+    </div>
 
     <label class="field" id="mSecretLabel">登录口令</label>
     <input id="mSecret" type="password" placeholder="粘贴你的登录口令" autocomplete="off">
@@ -1605,16 +1620,26 @@ function showLoginModal(opts) {
   const kindSel = m.querySelector('#mKind');
   const secretLabel = m.querySelector('#mSecretLabel');
   const secretInput = m.querySelector('#mSecret');
-  kindSel.onchange = () => {
+  const userWrap = m.querySelector('#mUserWrap');
+  const userInput = m.querySelector('#mUser');
+  // 记住上次登录的账号名，方便同一台设备再来一次
+  try { userInput.value = load(K_USER, '') || ''; } catch (e) {}
+
+  const syncKindUI = () => {
     const isBackup = kindSel.value === 'backup';
     secretLabel.textContent = isBackup ? '一次性备用码（形如 K7M2-9QXF-3RTB-8WZD）' : '登录口令';
     secretInput.placeholder = isBackup ? '粘贴备用码' : '粘贴你的登录口令';
+    // 备用码本身能定位账号，所以隐藏账号输入框
+    if (userWrap) userWrap.style.display = isBackup ? 'none' : '';
   };
+  kindSel.onchange = syncKindUI;
+  syncKindUI();
   m.querySelector('#mCancel').onclick = closeModal;
   m.querySelector('#mSetupLink').onclick = showSetupModal;
   m.querySelector('#mOk').onclick = () => doLogin(m);
   secretInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(m); });
-  secretInput.focus();
+  if (userInput) userInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(m); });
+  (userInput || secretInput).focus();
 }
 
 async function doLogin(modal) {
@@ -1623,24 +1648,36 @@ async function doLogin(modal) {
   const api = modal.querySelector('#mApi').value.trim();
   const secret = modal.querySelector('#mSecret').value.trim();
   const kind = modal.querySelector('#mKind').value;
+  const userEl = modal.querySelector('#mUser');
+  const username = userEl ? userEl.value.trim() : '';
 
   errEl.textContent = '';
   if (!api) { errEl.textContent = '请填写同步服务地址'; return; }
   if (!secret) { errEl.textContent = '请填写口令或备用码'; return; }
+  if (kind === 'password' && !username) { errEl.textContent = '请填写账号'; return; }
 
   btn.disabled = true;
   btn.textContent = '验证中…';
   try {
-    const r = await login(api, secret, kind, describeDevice());
+    const r = await login(api, secret, kind, describeDevice(), username);
+    // 换账号登录前先处理本机残留数据（避免把上一个人的作业传进新账号）
+    const switched = await handleAccountSwitch(r.username || username);
+    if (switched === false) {   // 用户选择取消
+      btn.disabled = false;
+      btn.textContent = '登录';
+      return;
+    }
     apiBase = api;
     deviceToken = r.token;
     save(K_API, apiBase);
     save(K_TOKEN, deviceToken);
+    if (r.username) save(K_USER, r.username);
     closeModal();
     await firstSyncAfterLogin();
   } catch (e) {
     const map = {
-      invalid_secret: '口令或备用码不正确',
+      invalid_secret: '账号或口令不正确',
+      need_username: '这个服务有多个账号，请填写账号名',
       not_initialized: '服务还没初始化，请先按「首次使用」步骤初始化',
       unauthorized: '没有权限'
     };
@@ -1648,6 +1685,45 @@ async function doLogin(modal) {
     btn.disabled = false;
     btn.textContent = '登录';
   }
+}
+
+/**
+ * 换账号时的本机数据保护。
+ * 返回 false 表示用户取消登录，true 表示可以继续。
+ *
+ * 规则：
+ *  - 本机从没记录过数据归属（第一次登录）→ 认为是本账号的数据，不动
+ *  - 归属与新账号相同 → 不动（保持原有的合并行为）
+ *  - 归属不同 → 询问，确认后清空本机作业与计时，避免串数据
+ */
+async function handleAccountSwitch(newUser) {
+  const owner = load(K_OWNER, '') || '';
+  if (!newUser) return true;
+  if (!owner) { save(K_OWNER, newUser); return true; }
+  if (owner === newUser) return true;
+
+  const hasData = tasks.length > 0 || sessions.length > 0;
+  if (!hasData) { save(K_OWNER, newUser); return true; }
+
+  const ok = confirm(
+    `这台设备上保存着「${owner}」的 ${tasks.length} 项作业。\n\n` +
+    `现在要登录「${newUser}」。\n` +
+    `点「确定」会先清空本机这些作业（云端仍保留，换个账号登回去还能看到）。\n` +
+    `点「取消」则不登录。`
+  );
+  if (!ok) return false;
+
+  // 清空本地（不动云端）
+  tasks = [];
+  sessions = [];
+  deletedTasks = {};
+  activeTaskId = null;
+  save(K_TASKS, tasks);
+  save(K_RECS, sessions);
+  save(K_DEL, deletedTasks);
+  save(K_OWNER, newUser);
+  renderAll();
+  return true;
 }
 
 /** 登录后的第一次同步：云端为空就直接上传；两边都有则让用户选合并方式 */

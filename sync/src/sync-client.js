@@ -227,13 +227,21 @@ export async function pull(apiBase, token, fetchLike) {
   return { data: body.data, updatedAt: Number(body.updatedAt || 0) };
 }
 
-/** 登录：用口令或备用码换取设备令牌 */
-export async function login(apiBase, secret, kind, label, fetchLike) {
+/**
+ * 登录：用口令或备用码换取设备令牌
+ * @param {string} username 账号名（口令登录必填；备用码登录可省略，码本身能定位账号）
+ */
+export async function login(apiBase, secret, kind, label, username, fetchLike) {
   const doFetch = resolveFetch(fetchLike);
   const res = await doFetch(trimBase(apiBase) + '/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ secret, kind: kind || 'password', label: label || '' })
+    body: JSON.stringify({
+      secret,
+      kind: kind || 'password',
+      label: label || '',
+      username: username || ''
+    })
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ok) {
